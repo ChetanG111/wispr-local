@@ -1,6 +1,7 @@
 const { app, BrowserWindow, screen, globalShortcut, ipcMain } = require('electron');
 const path = require('path');
 const audioRecorder = require('./audioRecorder');
+const { transcribe } = require('./whisperRunner');
 
 let pillWindow;
 let transcriptWindow;
@@ -171,15 +172,45 @@ app.whenReady().then(() => {
         }
     });
 
-    ipcMain.on('audio:stop', () => {
+    ipcMain.on('audio:stop', async () => {
         console.log('[main] Received audio:stop');
         try {
             const result = audioRecorder.stopRecording();
             if (result && result.filePath) {
                 console.log('[main] Recording saved:', result.filePath);
+
+                // Small delay to ensure WAV file is fully written
+                await new Promise(resolve => setTimeout(resolve, 200));
+
+                // Run Whisper transcription
+                console.log('[main] Starting Whisper transcription...');
+                try {
+                    const text = await transcribe(result.filePath);
+                    console.log('[main] Transcription result:', text);
+
+                    // Send transcription to renderer
+                    if (pillWindow) {
+                        pillWindow.webContents.send('transcription-complete', text);
+                    }
+                } catch (transcribeErr) {
+                    console.error('[main] Transcription failed:', transcribeErr.message);
+                    // Still notify renderer so it can reset state
+                    if (pillWindow) {
+                        pillWindow.webContents.send('transcription-complete', '');
+                    }
+                }
+            } else {
+                // No file saved, send empty result
+                if (pillWindow) {
+                    pillWindow.webContents.send('transcription-complete', '');
+                }
             }
         } catch (err) {
             console.error('[main] Failed to stop recording:', err.message);
+            // Notify renderer on error
+            if (pillWindow) {
+                pillWindow.webContents.send('transcription-complete', '');
+            }
         }
     });
 });

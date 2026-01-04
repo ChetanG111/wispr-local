@@ -32,9 +32,10 @@ ipcRenderer.on('stop-recording', () => {
     setLoading();
     // Notify main process to stop audio capture
     ipcRenderer.send('audio:stop');
+});
 
-    // Mock processing delay (unchanged)
-    setTimeout(() => {
-        setIdle();
-    }, 2000);
+// Listen for transcription complete (from main process after Whisper finishes)
+ipcRenderer.on('transcription-complete', (event, text) => {
+    console.log('[pill] Transcription complete:', text);
+    setIdle();
 });
