@@ -1,10 +1,12 @@
-const { app, BrowserWindow, screen, globalShortcut, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, screen, globalShortcut, ipcMain, Tray, Menu, nativeImage, clipboard, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const audioRecorder = require('./audioRecorder');
 const whisperRunner = require('./whisperRunner');
 const db = require('./db');
 const { format } = require('./formatter');
+const logger = require('./logger');
 
 let pillWindow;
 let transcriptWindow;
@@ -133,9 +135,27 @@ function showTranscriptWindow() {
     }
 }
 
-app.whenReady().then(() => {
-    // Initialize modules with production-safe paths
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', (event, commandLine, workingDirectory) => {
+        // Someone tried to run a second instance, we should focus our window.
+        if (transcriptWindow) {
+            if (transcriptWindow.isMinimized()) transcriptWindow.restore();
+            transcriptWindow.show();
+            transcriptWindow.focus();
+        }
+    });
+
+    app.whenReady().then(() => {
+        // Initialize modules with production-safe paths
     const userDataPath = app.getPath('userData');
+    
+    // Initialize logger
+    logger.init();
+    logger.log('App started');
 
     // Database: stored in userData/data/app.db
     db.init(path.join(userDataPath, 'data'));
@@ -209,32 +229,46 @@ app.whenReady().then(() => {
     // IPC handlers for audio recording
     ipcMain.on('audio:start', () => {
         console.log('[main] Received audio:start');
+        logger.log('[main] Received audio:start');
         try {
             audioRecorder.startRecording();
         } catch (err) {
             console.error('[main] Failed to start recording:', err.message);
+            logger.error(`[main] Failed to start recording: ${err.message}`);
+            dialog.showErrorBox('Recording Error', `Failed to start recording:\n${err.message}`);
         }
     });
 
     ipcMain.on('audio:stop', async () => {
         console.log('[main] Received audio:stop');
+        logger.log('[main] Received audio:stop');
         try {
             const result = audioRecorder.stopRecording();
             if (result && result.filePath) {
                 console.log('[main] Recording saved:', result.filePath);
+                logger.log(`[main] Recording saved: ${result.filePath}`);
 
                 // Small delay to ensure WAV file is fully written
                 await new Promise(resolve => setTimeout(resolve, 200));
 
+                if (!fs.existsSync(result.filePath)) {
+                    logger.error(`[main] Recording file not found on disk: ${result.filePath}`);
+                    if (pillWindow) pillWindow.webContents.send('transcription-complete', '');
+                    return;
+                }
+
                 // Run Whisper transcription
                 console.log('[main] Starting Whisper transcription...');
+                logger.log('[main] Starting Whisper transcription...');
                 try {
                     const text = await whisperRunner.transcribe(result.filePath);
                     console.log('[main] Transcription result:', text);
+                    logger.log(`[main] Transcription result length: ${text.length}`);
 
                     // Apply formatting
                     const formattedText = format(text);
                     console.log('[main] Formatted text:', formattedText);
+                    logger.log('[main] Text formatted');
 
                     // Save to database
                     db.insertTranscript({
@@ -247,12 +281,57 @@ app.whenReady().then(() => {
                         status: 'ok'
                     });
 
-                    // Send transcription to renderer
+                    // Auto-paste text
+                    try {
+                        const previousText = clipboard.readText();
+                        // Small delay to ensure clipboard is ready
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                        clipboard.writeText(formattedText);
+                        logger.log('[main] Clipboard updated with new text');
+
+                        // Execute VBScript to simulate Ctrl+V
+                        // Using VBScript because it's built-in and reliable on Windows without native node modules
+                        const vbsPath = app.isPackaged 
+                            ? path.join(process.resourcesPath, 'paste.vbs') 
+                            : path.join(__dirname, 'paste.vbs');
+                        
+                        logger.log(`[main] Executing paste script: ${vbsPath}`);
+                        execFile('wscript', [vbsPath], (error) => {
+                            if (error) {
+                                console.error('[main] Paste failed:', error.message);
+                                logger.error(`[main] Paste script failed: ${error.message}`);
+                            } else {
+                                logger.log('[main] Paste script executed successfully');
+                            }
+                            // Restore clipboard after a delay to ensure paste has occurred
+                            // Increased delay to 300ms to be safe
+                            setTimeout(() => {
+                                if (previousText) {
+                                    clipboard.writeText(previousText);
+                                } else {
+                                    clipboard.clear();
+                                }
+                                logger.log('[main] Clipboard restored');
+                            }, 300);
+                        });
+                    } catch (pasteErr) {
+                        console.error('[main] Auto-paste logic error:', pasteErr.message);
+                        logger.error(`[main] Auto-paste logic error: ${pasteErr.message}`);
+                    }
+
+                    // Send transcription to renderer (Pill)
                     if (pillWindow) {
                         pillWindow.webContents.send('transcription-complete', formattedText);
                     }
+
+                    // Refresh transcript window (History) if it exists
+                    if (transcriptWindow) {
+                         // Send event to reload history
+                         transcriptWindow.webContents.send('refresh-history');
+                    }
                 } catch (transcribeErr) {
                     console.error('[main] Transcription failed:', transcribeErr.message);
+                    logger.error(`[main] Transcription failed: ${transcribeErr.message}`);
 
                     // Save error to database (keep WAV for debugging)
                     db.insertTranscript({
@@ -272,12 +351,15 @@ app.whenReady().then(() => {
                 }
             } else {
                 // No file saved, send empty result
+                console.log('[main] No recording file saved');
+                logger.log('[main] No recording file saved from audioRecorder');
                 if (pillWindow) {
                     pillWindow.webContents.send('transcription-complete', '');
                 }
             }
         } catch (err) {
             console.error('[main] Failed to stop recording:', err.message);
+            logger.error(`[main] Failed to stop recording handler: ${err.message}`);
             // Notify renderer on error
             if (pillWindow) {
                 pillWindow.webContents.send('transcription-complete', '');
@@ -333,6 +415,7 @@ app.whenReady().then(() => {
         };
     });
 });
+}
 
 // Clean up hook on quit
 app.on('will-quit', () => {

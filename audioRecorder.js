@@ -15,6 +15,7 @@
 const record = require('node-record-lpcm16');
 const fs = require('fs');
 const path = require('path');
+const logger = require('./logger');
 
 // Recording state
 let recording = null;
@@ -26,14 +27,34 @@ const SAMPLE_RATE = 16000;  // 16 kHz - optimal for speech recognition
 const CHANNELS = 1;         // Mono
 const BIT_DEPTH = 16;       // 16-bit PCM
 
-// Explicit SoX path - Electron does not reliably inherit system PATH on Windows
-const SOX_PATH = 'C:\\Program Files (x86)\\sox-14-4-2\\sox.exe';
-
 // Output directory state
 let recordingsBaseDir = null;
 
 function init(baseDir) {
     recordingsBaseDir = baseDir;
+}
+
+function getSoxPath() {
+    // Check if we are in a packaged environment
+    // We expect SoX to be in resources/sox/sox.exe
+    if (process.resourcesPath) {
+        const bundledPath = path.join(process.resourcesPath, 'sox', 'sox.exe');
+        if (fs.existsSync(bundledPath)) {
+            logger.log(`[audioRecorder] Using bundled SoX: ${bundledPath}`);
+            return bundledPath;
+        }
+    }
+    
+    // Fallback to system path or known location
+    const systemPath = 'C:\\Program Files (x86)\\sox-14-4-2\\sox.exe';
+    if (fs.existsSync(systemPath)) {
+        logger.log(`[audioRecorder] Using system SoX: ${systemPath}`);
+        return systemPath;
+    }
+
+    // Last resort: assume it's in PATH
+    logger.log('[audioRecorder] Using SoX from PATH');
+    return 'sox';
 }
 
 /**
@@ -122,7 +143,7 @@ function updateWavHeader(filePath, dataLength) {
 function startRecording() {
     // Prevent multiple simultaneous recordings
     if (recording) {
-        console.warn('[audioRecorder] Already recording, ignoring start request');
+        logger.log('[audioRecorder] Already recording, ignoring start request');
         return;
     }
 
@@ -130,8 +151,9 @@ function startRecording() {
         const recordingsDir = getRecordingsDir();
         const filename = generateFilename();
         currentFilePath = path.join(recordingsDir, filename);
+        const soxPath = getSoxPath();
 
-        console.log(`[audioRecorder] Starting recording: ${currentFilePath}`);
+        logger.log(`[audioRecorder] Starting recording: ${currentFilePath}`);
 
         // Create file stream and write placeholder WAV header
         fileStream = fs.createWriteStream(currentFilePath);
@@ -143,7 +165,7 @@ function startRecording() {
             channels: CHANNELS,
             audioType: 'wav',      // Direct WAV output
             recorder: 'sox',       // Use SoX on Windows
-            soxPath: SOX_PATH,     // Explicit path, bypasses PATH resolution
+            soxPath: soxPath,     
             threshold: 0,          // Start immediately, no silence detection
             silence: '0',          // No silence trimming
             endOnSilence: false,   // Don't stop on silence
@@ -160,11 +182,11 @@ function startRecording() {
                 }
             })
             .on('error', (err) => {
-                console.error('[audioRecorder] Recording error:', err.message);
+                logger.error(`[audioRecorder] Recording stream error: ${err.message}`);
                 cleanup();
             })
             .on('end', () => {
-                console.log(`[audioRecorder] Recording ended, data length: ${dataLength} bytes`);
+                logger.log(`[audioRecorder] Recording ended, data length: ${dataLength} bytes`);
             });
 
         // Store data length reference for stop function
@@ -174,8 +196,9 @@ function startRecording() {
         });
 
     } catch (err) {
-        console.error('[audioRecorder] Failed to start recording:', err.message);
+        logger.error(`[audioRecorder] Failed to start recording: ${err.message}`);
         cleanup();
+        throw err; // Rethrow so caller knows
     }
 }
 
@@ -185,14 +208,14 @@ function startRecording() {
  */
 function stopRecording() {
     if (!recording) {
-        console.warn('[audioRecorder] Not recording, ignoring stop request');
+        logger.log('[audioRecorder] Not recording, ignoring stop request');
         return null;
     }
 
     const filePath = currentFilePath;
     const dataLength = recording._dataLength || 0;
 
-    console.log(`[audioRecorder] Stopping recording: ${filePath}`);
+    logger.log(`[audioRecorder] Stopping recording: ${filePath}`);
 
     try {
         // Stop the recording
@@ -205,9 +228,9 @@ function stopRecording() {
                 if (filePath && fs.existsSync(filePath)) {
                     try {
                         updateWavHeader(filePath, dataLength);
-                        console.log(`[audioRecorder] WAV header updated, total size: ${dataLength + 44} bytes`);
+                        logger.log(`[audioRecorder] WAV header updated, total size: ${dataLength + 44} bytes`);
                     } catch (err) {
-                        console.error('[audioRecorder] Failed to update WAV header:', err.message);
+                        logger.error(`[audioRecorder] Failed to update WAV header: ${err.message}`);
                     }
                 }
             });
@@ -218,7 +241,7 @@ function stopRecording() {
         return { filePath };
 
     } catch (err) {
-        console.error('[audioRecorder] Failed to stop recording:', err.message);
+        logger.error(`[audioRecorder] Failed to stop recording: ${err.message}`);
         cleanup();
         return null;
     }

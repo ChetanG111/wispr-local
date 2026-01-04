@@ -11,6 +11,7 @@
 
 const { spawn } = require('child_process');
 const path = require('path');
+const logger = require('./logger');
 
 // Paths state
 let whisperCliPath = null;
@@ -34,9 +35,9 @@ function transcribe(wavPath) {
             return;
         }
 
-        console.log(`[whisperRunner] Transcribing: ${wavPath}`);
-        console.log(`[whisperRunner] Using model: ${whisperModelPath}`);
-        console.log(`[whisperRunner] Using CLI: ${whisperCliPath}`);
+        logger.log(`[whisperRunner] Transcribing: ${wavPath}`);
+        logger.log(`[whisperRunner] Using model: ${whisperModelPath}`);
+        logger.log(`[whisperRunner] Using CLI: ${whisperCliPath}`);
 
         // Spawn whisper-cli.exe with required arguments
         // -m: model path
@@ -70,22 +71,22 @@ function transcribe(wavPath) {
 
         whisperProcess.on('error', (err) => {
             currentProcess = null;
-            console.error(`[whisperRunner] Failed to spawn whisper-cli: ${err.message}`);
+            logger.error(`[whisperRunner] Failed to spawn whisper-cli: ${err.message}`);
             reject(new Error(`Failed to spawn whisper-cli: ${err.message}`));
         });
 
         whisperProcess.on('close', (code) => {
             currentProcess = null;
             if (code !== 0) {
-                console.error(`[whisperRunner] whisper-cli exited with code ${code}`);
-                console.error(`[whisperRunner] stderr: ${stderr}`);
+                logger.error(`[whisperRunner] whisper-cli exited with code ${code}`);
+                logger.error(`[whisperRunner] stderr: ${stderr}`);
                 reject(new Error(`whisper-cli exited with code ${code}: ${stderr}`));
                 return;
             }
 
             // Clean up the output - trim whitespace
             const transcription = stdout.trim();
-            console.log(`[whisperRunner] Transcription complete: "${transcription.substring(0, 100)}${transcription.length > 100 ? '...' : ''}"`);
+            logger.log(`[whisperRunner] Transcription complete: "${transcription.substring(0, 100)}${transcription.length > 100 ? '...' : ''}"`);
             resolve(transcription);
         });
     });
@@ -96,7 +97,7 @@ function transcribe(wavPath) {
  */
 function cancel() {
     if (currentProcess) {
-        console.log('[whisperRunner] Killing active Whisper process');
+        logger.log('[whisperRunner] Killing active Whisper process');
         currentProcess.kill();
         currentProcess = null;
     }

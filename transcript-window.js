@@ -371,6 +371,12 @@
                 loadHistory();
             }
         });
+
+        // Listen for refresh command from main process
+        ipcRenderer.on('refresh-history', () => {
+            console.log('[transcript-window] Received refresh-history command');
+            loadHistory();
+        });
     }
 
     // Initialize when DOM is ready
