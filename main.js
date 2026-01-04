@@ -1,7 +1,9 @@
 const { app, BrowserWindow, screen, globalShortcut, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const audioRecorder = require('./audioRecorder');
 const { transcribe } = require('./whisperRunner');
+const db = require('./db');
 
 let pillWindow;
 let transcriptWindow;
@@ -188,12 +190,35 @@ app.whenReady().then(() => {
                     const text = await transcribe(result.filePath);
                     console.log('[main] Transcription result:', text);
 
+                    // Save to database (raw_text = final_text, no processing)
+                    db.insertTranscript({
+                        created_at: new Date().toISOString(),
+                        audio_path: result.filePath,
+                        raw_text: text,
+                        final_text: text,
+                        duration_ms: null,
+                        model: 'whisper.cpp base',
+                        status: 'ok'
+                    });
+
                     // Send transcription to renderer
                     if (pillWindow) {
                         pillWindow.webContents.send('transcription-complete', text);
                     }
                 } catch (transcribeErr) {
                     console.error('[main] Transcription failed:', transcribeErr.message);
+
+                    // Save error to database (keep WAV for debugging)
+                    db.insertTranscript({
+                        created_at: new Date().toISOString(),
+                        audio_path: result.filePath,
+                        raw_text: '',
+                        final_text: '',
+                        duration_ms: null,
+                        model: 'whisper.cpp base',
+                        status: 'error'
+                    });
+
                     // Still notify renderer so it can reset state
                     if (pillWindow) {
                         pillWindow.webContents.send('transcription-complete', '');
@@ -213,6 +238,30 @@ app.whenReady().then(() => {
             }
         }
     });
+
+    // IPC handler for loading history
+    ipcMain.handle('history:load', (event, limit = 50) => {
+        console.log('[main] Loading history, limit:', limit);
+        return db.getHistory(limit);
+    });
+
+    // IPC handler for deleting a transcript
+    ipcMain.handle('history:delete', (event, id) => {
+        console.log('[main] Deleting transcript id:', id);
+        const audioPath = db.deleteTranscript(id);
+
+        // Delete the audio file from disk
+        if (audioPath && fs.existsSync(audioPath)) {
+            try {
+                fs.unlinkSync(audioPath);
+                console.log('[main] Deleted audio file:', audioPath);
+            } catch (err) {
+                console.error('[main] Failed to delete audio file:', err.message);
+            }
+        }
+
+        return { success: true };
+    });
 });
 
 // Clean up hook on quit
@@ -227,5 +276,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
     app.isQuitting = true;
+    // Close database connection
+    db.close();
 });
 
