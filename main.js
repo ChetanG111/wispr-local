@@ -1,13 +1,14 @@
-const { app, BrowserWindow, screen, globalShortcut, ipcMain } = require('electron');
+const { app, BrowserWindow, screen, globalShortcut, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const audioRecorder = require('./audioRecorder');
-const { transcribe } = require('./whisperRunner');
+const whisperRunner = require('./whisperRunner');
 const db = require('./db');
 const { format } = require('./formatter');
 
 let pillWindow;
 let transcriptWindow;
+let tray;
 
 function createPillWindow() {
     const display = screen.getPrimaryDisplay();
@@ -82,7 +83,7 @@ function createTranscriptWindow() {
         maxWidth: 600,
         maxHeight: 800,
         show: false, // Hidden by default
-        skipTaskbar: false,
+        skipTaskbar: true,
         hasShadow: false, // Disable window shadow for clean edges
         webPreferences: {
             nodeIntegration: true,
@@ -101,6 +102,29 @@ function createTranscriptWindow() {
     });
 }
 
+function createTray() {
+    const iconPath = path.join(__dirname, 'tray-icon.png');
+    // Resize icon to suitable size (16x16 is standard for Windows tray)
+    const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+    tray = new Tray(trayIcon);
+    tray.setToolTip('Wispr Local');
+
+    const contextMenu = Menu.buildFromTemplate([
+        {
+            label: 'Open History',
+            click: () => showTranscriptWindow()
+        },
+        {
+            label: 'Quit',
+            click: () => {
+                app.isQuitting = true;
+                app.quit();
+            }
+        }
+    ]);
+    tray.setContextMenu(contextMenu);
+}
+
 // Helper to show transcript window (can be called from IPC or menu)
 function showTranscriptWindow() {
     if (transcriptWindow) {
@@ -110,8 +134,37 @@ function showTranscriptWindow() {
 }
 
 app.whenReady().then(() => {
+    // Initialize modules with production-safe paths
+    const userDataPath = app.getPath('userData');
+
+    // Database: stored in userData/data/app.db
+    db.init(path.join(userDataPath, 'data'));
+
+    // Audio Recorder: recordings stored in userData/audio/recordings
+    audioRecorder.init(userDataPath);
+
+    // Whisper: binary and model paths
+    const whisperBase = app.isPackaged
+        ? path.join(process.resourcesPath, 'whisper')
+        : path.join(__dirname, 'whisper');
+
+    const whisperCli = path.join(whisperBase, 'bin', 'whisper-cli.exe');
+    const whisperModel = path.join(whisperBase, 'models', 'ggml-base.en.bin');
+
+    whisperRunner.init(whisperCli, whisperModel);
+
     createPillWindow();
     createTranscriptWindow();
+    createTray();
+
+    // Enable auto-launch on startup (only in production)
+    if (app.isPackaged) {
+        app.setLoginItemSettings({
+            openAtLogin: true,
+            openAsHidden: true,
+            path: app.getPath('exe')
+        });
+    }
 
     /* 
        Using uiohook-napi for global key release detection (Hold-to-Talk).
@@ -146,18 +199,6 @@ app.whenReady().then(() => {
 
     uIOhook.start();
 
-    // Register global shortcut to toggle transcript window (Ctrl+Shift+T)
-    globalShortcut.register('CommandOrControl+Shift+T', () => {
-        if (transcriptWindow) {
-            if (transcriptWindow.isVisible()) {
-                transcriptWindow.hide();
-            } else {
-                transcriptWindow.show();
-                transcriptWindow.focus();
-            }
-        }
-    });
-
     // IPC handler for close button in transcript window
     ipcMain.on('hide-transcript-window', () => {
         if (transcriptWindow) {
@@ -188,7 +229,7 @@ app.whenReady().then(() => {
                 // Run Whisper transcription
                 console.log('[main] Starting Whisper transcription...');
                 try {
-                    const text = await transcribe(result.filePath);
+                    const text = await whisperRunner.transcribe(result.filePath);
                     console.log('[main] Transcription result:', text);
 
                     // Apply formatting
@@ -300,11 +341,29 @@ app.on('will-quit', () => {
 });
 
 app.on('window-all-closed', () => {
-    app.quit();
+    // Do not quit when windows are closed (background utility behavior)
 });
 
 app.on('before-quit', () => {
     app.isQuitting = true;
+
+    // Stop any active recording
+    try {
+        audioRecorder.stopRecording();
+    } catch (e) {
+        console.error('[main] Failed to stop recording on quit', e);
+    }
+
+    // Kill Whisper if running
+    try {
+        whisperRunner.cancel();
+    } catch (e) {
+        console.error('[main] Failed to cancel whisper on quit', e);
+    }
+
+    // Stop uIOhook to unhook keyboard events
+    const { uIOhook } = require('uiohook-napi');
+    uIOhook.stop();
     // Close database connection
     db.close();
 });

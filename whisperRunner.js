@@ -12,9 +12,15 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
-// Paths relative to project root
-const WHISPER_CLI = path.join(__dirname, 'whisper', 'bin', 'whisper-cli.exe');
-const WHISPER_MODEL = path.join(__dirname, 'whisper', 'models', 'ggml-base.en.bin');
+// Paths state
+let whisperCliPath = null;
+let whisperModelPath = null;
+let currentProcess = null;
+
+function init(cliPath, modelPath) {
+    whisperCliPath = cliPath;
+    whisperModelPath = modelPath;
+}
 
 /**
  * Transcribe a WAV file using Whisper
@@ -23,9 +29,14 @@ const WHISPER_MODEL = path.join(__dirname, 'whisper', 'models', 'ggml-base.en.bi
  */
 function transcribe(wavPath) {
     return new Promise((resolve, reject) => {
+        if (!whisperCliPath || !whisperModelPath) {
+            reject(new Error('Whisper runner not initialized with paths'));
+            return;
+        }
+
         console.log(`[whisperRunner] Transcribing: ${wavPath}`);
-        console.log(`[whisperRunner] Using model: ${WHISPER_MODEL}`);
-        console.log(`[whisperRunner] Using CLI: ${WHISPER_CLI}`);
+        console.log(`[whisperRunner] Using model: ${whisperModelPath}`);
+        console.log(`[whisperRunner] Using CLI: ${whisperCliPath}`);
 
         // Spawn whisper-cli.exe with required arguments
         // -m: model path
@@ -33,16 +44,18 @@ function transcribe(wavPath) {
         // -nt: no timestamps
         // -np: no progress output
         const args = [
-            '-m', WHISPER_MODEL,
+            '-m', whisperModelPath,
             '-f', wavPath,
             '-nt',
             '-np'
         ];
 
-        const whisperProcess = spawn(WHISPER_CLI, args, {
-            cwd: path.dirname(WHISPER_CLI),
+        const whisperProcess = spawn(whisperCliPath, args, {
+            cwd: path.dirname(whisperCliPath),
             windowsHide: true
         });
+
+        currentProcess = whisperProcess;
 
         let stdout = '';
         let stderr = '';
@@ -56,11 +69,13 @@ function transcribe(wavPath) {
         });
 
         whisperProcess.on('error', (err) => {
+            currentProcess = null;
             console.error(`[whisperRunner] Failed to spawn whisper-cli: ${err.message}`);
             reject(new Error(`Failed to spawn whisper-cli: ${err.message}`));
         });
 
         whisperProcess.on('close', (code) => {
+            currentProcess = null;
             if (code !== 0) {
                 console.error(`[whisperRunner] whisper-cli exited with code ${code}`);
                 console.error(`[whisperRunner] stderr: ${stderr}`);
@@ -76,6 +91,19 @@ function transcribe(wavPath) {
     });
 }
 
+/**
+ * Cancel the current transcription process if running
+ */
+function cancel() {
+    if (currentProcess) {
+        console.log('[whisperRunner] Killing active Whisper process');
+        currentProcess.kill();
+        currentProcess = null;
+    }
+}
+
 module.exports = {
-    transcribe
+    transcribe,
+    init,
+    cancel
 };

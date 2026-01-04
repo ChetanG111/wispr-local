@@ -15,36 +15,43 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-// Database path
-const DB_DIR = path.join(__dirname, 'data');
-const DB_PATH = path.join(DB_DIR, 'app.db');
+let db = null;
 
-// Ensure data directory exists
-if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
+/**
+ * Initialize database with specific path
+ * @param {string} dateDir - Directory to store database
+ */
+function init(dataDir) {
+    // Database path
+    const DB_PATH = path.join(dataDir, 'app.db');
+
+    // Ensure data directory exists
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    // Open database (creates if not exists)
+    db = new Database(DB_PATH);
+
+    // Enable WAL mode for better performance
+    db.pragma('journal_mode = WAL');
+
+    // Create transcripts table if not exists
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS transcripts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT,
+            audio_path TEXT,
+            raw_text TEXT,
+            final_text TEXT,
+            duration_ms INTEGER,
+            model TEXT,
+            status TEXT
+        );
+    `);
+
+    console.log('[db] Database initialized:', DB_PATH);
 }
-
-// Open database (creates if not exists)
-const db = new Database(DB_PATH);
-
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
-
-// Create transcripts table if not exists
-db.exec(`
-    CREATE TABLE IF NOT EXISTS transcripts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at TEXT,
-        audio_path TEXT,
-        raw_text TEXT,
-        final_text TEXT,
-        duration_ms INTEGER,
-        model TEXT,
-        status TEXT
-    );
-`);
-
-console.log('[db] Database initialized:', DB_PATH);
 
 /**
  * Insert a new transcript record
@@ -179,5 +186,6 @@ module.exports = {
     getTranscriptById,
     updateFinalText,
     deleteTranscript,
-    close
+    close,
+    init
 };

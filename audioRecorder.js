@@ -29,11 +29,21 @@ const BIT_DEPTH = 16;       // 16-bit PCM
 // Explicit SoX path - Electron does not reliably inherit system PATH on Windows
 const SOX_PATH = 'C:\\Program Files (x86)\\sox-14-4-2\\sox.exe';
 
+// Output directory state
+let recordingsBaseDir = null;
+
+function init(baseDir) {
+    recordingsBaseDir = baseDir;
+}
+
 /**
  * Get the recordings directory path, creating it if necessary
  */
 function getRecordingsDir() {
-    const recordingsDir = path.join(__dirname, 'audio', 'recordings');
+    if (!recordingsBaseDir) {
+        throw new Error('Audio recorder not initialized with base directory');
+    }
+    const recordingsDir = path.join(recordingsBaseDir, 'audio', 'recordings');
 
     // Ensure directory exists
     if (!fs.existsSync(recordingsDir)) {
@@ -225,5 +235,6 @@ function cleanup() {
 
 module.exports = {
     startRecording,
-    stopRecording
+    stopRecording,
+    init
 };

@@ -2,10 +2,30 @@
   "name": "wispr-local",
   "version": "1.0.0",
   "description": "Floating pill UI",
+  "productName": "Wispr Local",
+  "appId": "com.wisprlocal.app",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "patch-package"
+    "postinstall": "electron-builder install-app-deps && patch-package",
+    "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --overwrite"
+  },
+  "build": {
+    "productName": "Wispr Local",
+    "appId": "com.wisprlocal.app",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "dir",
+      "executableName": "WisprLocal",
+      "verifyUpdateCodeSignature": false,
+      "forceCodeSigning": false
+    },
+    "extraResources": [
+      "whisper/**"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -13,11 +33,13 @@
   "type": "commonjs",
   "dependencies": {
     "better-sqlite3": "^12.5.0",
-    "electron": "^39.2.7",
     "node-record-lpcm16": "^1.0.1",
     "uiohook-napi": "^1.5.4"
   },
   "devDependencies": {
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "electron-packager": "^17.1.2",
     "patch-package": "^8.0.1"
   }
 }

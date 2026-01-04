@@ -1,188 +1,200 @@
 /**
  * formatter.js
- * Text formatting module for post-processing Whisper transcription output.
+ * Deterministic text formatting module for post-processing Whisper transcription output.
  * 
- * Applies formatting rules to upgrade raw transcription to WISPR-like quality.
- * 
- * Exposed functions:
- * - format(rawText, options) → formattedText
+ * Rules applied in order:
+ * A. Spoken command replacements
+ * B. Sentence casing
+ * C. Length-based sentence breaks
+ * D. Paragraph heuristics
+ * E. Cleanup
  */
 
+const COMMANDS = [
+    // Phrases mapping to Newlines
+    { pattern: /\bnew\s+paragraph\b/gi, replacement: '\n\n' },
+    { pattern: /\bnew\s+line\b/gi, replacement: '\n' },
+    { pattern: /\bnext\s+line\b/gi, replacement: '\n' },
+
+    // Bullets
+    { pattern: /\bnext\s+point\b/gi, replacement: '\n•' },
+    { pattern: /\bbullet\b/gi, replacement: '•' }, // Default bullet
+    { pattern: /\bpoint\s+(?:one|1)\b/gi, replacement: '\n1.' },
+    { pattern: /\bpoint\s+(?:two|2)\b/gi, replacement: '\n2.' },
+
+    // Punctuation
+    { pattern: /\bcomma\b/gi, replacement: ',' },
+    { pattern: /\b(?:period|full\s+stop)\b/gi, replacement: '.' }
+];
+
 /**
- * Format raw transcription text with various enhancements
+ * Format raw transcription text with strict deterministic rules
  * @param {string} rawText - Raw Whisper transcription output
- * @param {Object} options - Formatting options (optional)
- * @param {boolean} options.sentenceCasing - Apply sentence casing (default: true)
- * @param {boolean} options.spokenCommands - Replace spoken commands (default: true)
- * @param {boolean} options.cleanup - Apply cleanup rules (default: true)
  * @returns {string} - Formatted text
  */
-function format(rawText, options = {}) {
+function format(rawText) {
     if (!rawText || typeof rawText !== 'string') {
         return '';
     }
 
-    // Default options
-    const opts = {
-        sentenceCasing: true,
-        spokenCommands: true,
-        cleanup: true,
-        ...options
-    };
-
     let text = rawText;
 
-    // Apply formatting in MANDATORY ORDER
-    // A. Sentence casing (first)
-    if (opts.sentenceCasing) {
-        text = applySentenceCasing(text);
+    // A. Spoken command replacements (HIGHEST PRIORITY)
+    // Remove the spoken words completely and replace with symbols
+    for (const cmd of COMMANDS) {
+        text = text.replace(cmd.pattern, cmd.replacement);
     }
 
-    // B. Spoken commands (second)
-    if (opts.spokenCommands) {
-        text = applySpokenCommands(text);
-    }
+    // B. Sentence casing
+    // Capitalize first letter: At start, After . ? !, After \n or \n\n
+    // Do NOT change words otherwise
+    text = applySentenceCasing(text);
 
-    // C. Pause-based structure (third)
-    // TODO: Implement pause-based formatting when timestamp data is available
-    // This requires Whisper to output word-level timestamps
-    // Pause ≥ 800ms → paragraph break (\n\n)
-    // Pause ≥ 400ms → sentence break (.)
-    // Pause < 400ms → space
-    // text = applyPauseBasedStructure(text, timestamps);
+    // C. Length-based sentence breaks
+    // If > 140 chars without punctuation, insert . at nearest space
+    text = applyLengthBreaks(text);
 
-    // D. Cleanup (last)
-    if (opts.cleanup) {
-        text = applyCleanup(text);
-    }
+    // D. Paragraph heuristics
+    // Insert \n\n when sentence starts with specific keywords
+    text = applyParagraphHeuristics(text);
+
+    // E. Cleanup (LAST)
+    text = applyCleanup(text);
 
     return text;
 }
 
-/**
- * A. Sentence Casing
- * Capitalize first letter after sentence-ending punctuation (. ? !)
- * Preserves original words - no modifications except capitalization
- * @param {string} text - Input text
- * @returns {string} - Text with sentence casing applied
- */
 function applySentenceCasing(text) {
     if (!text) return '';
 
-    // Capitalize first character of the text
-    let result = text.charAt(0).toUpperCase() + text.slice(1);
+    // 1. Capitalize start of text
+    let res = text.charAt(0).toUpperCase() + text.slice(1);
 
-    // Capitalize first letter after . ? ! followed by space(s)
-    // Uses regex to find sentence boundaries and capitalize the next letter
-    result = result.replace(/([.?!])\s+([a-z])/g, (match, punctuation, letter) => {
-        return punctuation + ' ' + letter.toUpperCase();
+    // 2. Capitalize after . ? !
+    res = res.replace(/([.?!]\s*)([a-z])/g, (match, sep, char) => {
+        return sep + char.toUpperCase();
     });
 
-    return result;
+    // 3. Capitalize after newlines (\n or \n\n)
+    res = res.replace(/(\n+\s*)([a-z])/g, (match, sep, char) => {
+        return sep + char.toUpperCase();
+    });
+
+    return res;
 }
 
-/**
- * B. Spoken Commands
- * Replace exact spoken command phrases with their symbols
- * Only exact phrases - no guessing or fuzzy matching
- * @param {string} text - Input text
- * @returns {string} - Text with spoken commands replaced
- */
-function applySpokenCommands(text) {
-    if (!text) return '';
+function applyLengthBreaks(text) {
+    let newText = text;
+    const LIMIT = 140;
+    let scanStart = 0;
 
-    let result = text;
+    // Iterate until no chunks exceed limit
+    // This looks for sequences of characters that are NOT . ? ! or newline
+    // We break them if they exceed 140 chars
+    while (true) {
+        let changed = false;
+        let counter = 0;
+        let lastSpaceIndex = -1;
+        let chunkStartIndex = scanStart;
 
-    // Define spoken command mappings (case-insensitive matching)
-    // Order matters: longer phrases first to prevent partial matches
-    const commands = [
-        // Multi-word commands first
-        { pattern: /\bnew line\b/gi, replacement: '\n' },
-        { pattern: /\bnewline\b/gi, replacement: '\n' },
-        { pattern: /\bnext point\b/gi, replacement: '\n•' },
-        { pattern: /\bnext bullet\b/gi, replacement: '\n•' },
-        { pattern: /\bquestion mark\b/gi, replacement: '?' },
-        { pattern: /\bexclamation mark\b/gi, replacement: '!' },
-        { pattern: /\bexclamation point\b/gi, replacement: '!' },
+        // Scan the text tracking distance from last punctuation
+        for (let i = scanStart; i < newText.length; i++) {
+            const char = newText[i];
 
-        // Single-word commands (exact word boundaries)
-        { pattern: /\bcomma\b/gi, replacement: ',' },
-        { pattern: /\bperiod\b/gi, replacement: '.' },
-    ];
+            // Punctuation resets the counter
+            if (['.', '?', '!', '\n'].includes(char)) {
+                counter = 0;
+                lastSpaceIndex = -1;
+                chunkStartIndex = i + 1;
+                // Safe to advance scanStart as this chunk is valid
+                if (!changed) scanStart = i + 1;
+            } else {
+                counter++;
+                if (char === ' ') {
+                    lastSpaceIndex = i;
+                }
+            }
 
-    // Apply each command replacement
-    for (const cmd of commands) {
-        result = result.replace(cmd.pattern, cmd.replacement);
+            if (counter > LIMIT) {
+                // Break at last space found in this chunk
+                if (lastSpaceIndex !== -1 && lastSpaceIndex > chunkStartIndex) {       
+                    const before = newText.substring(0, lastSpaceIndex);
+                    const after = newText.substring(lastSpaceIndex + 1);
+
+                    // Insert period, space, and simple manual capitalization for the next word
+                    // to ensure "Output is pleasant to read"
+                    const nextChar = after.charAt(0).toUpperCase();
+                    newText = before + '. ' + nextChar + after.slice(1);
+
+                    changed = true;
+                    // Resume scanning from the character after the inserted period
+                    scanStart = lastSpaceIndex + 1; 
+                    break; // Restart loop
+                } else {
+                    // If no space found (single super long word?), we can't insert at space.
+                    // Just reset counter to avoid infinite loop and move on.
+                    counter = 0;
+                }
+            }
+        }
+
+        if (!changed) break;
     }
+    return newText;
+}
+function applyParagraphHeuristics(text) {
+    // Keywords to trigger paragraph break
+    const keywords = ['Okay', 'So', 'Next', 'Moving on', 'Now'];
 
-    // Re-apply sentence casing after inserting punctuation
-    // This ensures proper capitalization after new periods/question marks
-    result = applySentenceCasing(result);
+    // Pattern: 
+    // Group 1: Sentence terminator + whitespace (or start of line/str)
+    // Group 2: The keyword (case insensitive match, though we largely capitalized already)
+    // Boundary \b ensures we don't match "Someone"
+    const pattern = new RegExp(`((?:[.?!]\\s+)|(?:^)|(?:\\n+))(${keywords.join('|')})\\b`, 'gi');
 
-    return result;
+    return text.replace(pattern, (match, prefix, word) => {
+        // If it's already on a new line (prefix contains \n), we might just enforce \n\n?
+        // But rule says: "Insert \n\n when a sentence starts with..."
+
+        // If match is start of string, likely don't want \n\n
+        if (!prefix) return match;
+
+        // If prefix is punct+space (e.g. ". So") -> ".\n\nSo"
+        if (/[.?!]/.test(prefix)) {
+            const punct = prefix.match(/[.?!]/)[0];
+            // Ensure word is capitalized (it should be from casing step, but let's correct casing just in case)
+            const capWord = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+            return `${punct}\n\n${capWord}`;
+        }
+
+        // If prefix matches existing newlines, ensure we have \n\n?
+        // User didn't strictly say normalize specific newlines here, but "Insert \n\n".
+
+        return match;
+    });
 }
 
-/**
- * C. Pause-based Structure (TODO)
- * Uses Whisper timestamps to insert paragraph/sentence breaks based on pauses
- * @param {string} text - Input text
- * @param {Array} timestamps - Word-level timestamp data from Whisper
- * @returns {string} - Text with pause-based structure applied
- */
-// function applyPauseBasedStructure(text, timestamps) {
-//     // TODO: Implement when timestamp data is available
-//     // 
-//     // Algorithm:
-//     // 1. Parse word-level timestamps from Whisper output
-//     // 2. Calculate pause duration between consecutive words
-//     // 3. Insert breaks based on pause thresholds:
-//     //    - Pause ≥ 800ms → paragraph break (\n\n)
-//     //    - Pause ≥ 400ms → sentence break (.) 
-//     //    - Pause < 400ms → space (default)
-//     // 4. Re-apply sentence casing after structure changes
-//     //
-//     // This is where WISPR Flow's quality improvement comes from
-//     return text;
-// }
-
-/**
- * D. Cleanup
- * Minimal cleanup: remove repeated spaces, trim lines
- * NO synonym replacement, NO paraphrasing
- * @param {string} text - Input text
- * @returns {string} - Cleaned up text
- */
 function applyCleanup(text) {
-    if (!text) return '';
+    let res = text;
 
-    let result = text;
+    // Collapse multiple spaces -> one space
+    res = res.replace(/[ \t]{2,}/g, ' ');
 
-    // Remove repeated spaces (replace 2+ spaces with single space)
-    result = result.replace(/ {2,}/g, ' ');
+    // Trim each line
+    res = res.split('\n').map(line => line.trim()).join('\n');
 
-    // Trim each line (remove leading/trailing whitespace per line)
-    result = result.split('\n').map(line => line.trim()).join('\n');
+    // Remove empty bullet points (lines that are just "•" or "• ")
+    res = res.replace(/^•\s*$/gm, '');
 
-    // Remove repeated newlines (more than 2 consecutive)
-    result = result.replace(/\n{3,}/g, '\n\n');
+    // Collapse 3+ newlines to 2 (cleanup empty gaps)
+    res = res.replace(/\n{3,}/g, '\n\n');
 
-    // Fix spacing around punctuation
-    // Remove space before punctuation
-    result = result.replace(/ +([,.?!])/g, '$1');
+    // Remove trailing spaces / newlines
+    res = res.trim();
 
-    // Ensure space after punctuation (except at end or before newline)
-    result = result.replace(/([,.?!])([a-zA-Z])/g, '$1 $2');
-
-    // Trim entire text
-    result = result.trim();
-
-    return result;
+    return res;
 }
 
 module.exports = {
-    format,
-    // Export individual functions for testing/debugging
-    applySentenceCasing,
-    applySpokenCommands,
-    applyCleanup
+    format
 };
