@@ -1,0 +1,25 @@
+diff --git a/node_modules/node-record-lpcm16/recorders/sox.js b/node_modules/node-record-lpcm16/recorders/sox.js
+index 8ebfe2b..fc1d2dd 100644
+--- a/node_modules/node-record-lpcm16/recorders/sox.js
++++ b/node_modules/node-record-lpcm16/recorders/sox.js
+@@ -1,8 +1,9 @@
+ module.exports = (options) => {
+-  const cmd = 'sox'
++  // Explicit path - Electron does not reliably inherit system PATH on Windows
++  const cmd = options.soxPath || 'C:\\Program Files (x86)\\sox-14-4-2\\sox.exe'
+ 
+   let args = [
+-    '--default-device',
++    '-t', 'waveaudio', '-d',  // Windows audio input (replaces --default-device)
+     '--no-show-progress', // show no progress
+     '--rate', options.sampleRate, // sample rate
+     '--channels', options.channels, // channels
+@@ -19,7 +20,7 @@ module.exports = (options) => {
+     ])
+   }
+ 
+-  const spawnOptions = { }
++  const spawnOptions = {}
+ 
+   if (options.device) {
+     spawnOptions.env = { ...process.env, AUDIODEV: options.device }

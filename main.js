@@ -1,5 +1,6 @@
 const { app, BrowserWindow, screen, globalShortcut, ipcMain } = require('electron');
 const path = require('path');
+const audioRecorder = require('./audioRecorder');
 
 let pillWindow;
 let transcriptWindow;
@@ -159,6 +160,28 @@ app.whenReady().then(() => {
             transcriptWindow.hide();
         }
     });
+
+    // IPC handlers for audio recording
+    ipcMain.on('audio:start', () => {
+        console.log('[main] Received audio:start');
+        try {
+            audioRecorder.startRecording();
+        } catch (err) {
+            console.error('[main] Failed to start recording:', err.message);
+        }
+    });
+
+    ipcMain.on('audio:stop', () => {
+        console.log('[main] Received audio:stop');
+        try {
+            const result = audioRecorder.stopRecording();
+            if (result && result.filePath) {
+                console.log('[main] Recording saved:', result.filePath);
+            }
+        } catch (err) {
+            console.error('[main] Failed to stop recording:', err.message);
+        }
+    });
 });
 
 // Clean up hook on quit
@@ -174,3 +197,4 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
     app.isQuitting = true;
 });
+

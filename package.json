@@ -4,7 +4,8 @@
   "description": "Floating pill UI",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "postinstall": "patch-package"
   },
   "keywords": [],
   "author": "",
@@ -12,6 +13,10 @@
   "type": "commonjs",
   "dependencies": {
     "electron": "^39.2.7",
+    "node-record-lpcm16": "^1.0.1",
     "uiohook-napi": "^1.5.4"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }

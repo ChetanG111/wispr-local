@@ -23,13 +23,17 @@ function setLoading() {
 // Listen for start recording (Hold Start)
 ipcRenderer.on('start-recording', () => {
     setRecording();
+    // Notify main process to start audio capture
+    ipcRenderer.send('audio:start');
 });
 
 // Listen for stop recording (Release)
 ipcRenderer.on('stop-recording', () => {
     setLoading();
+    // Notify main process to stop audio capture
+    ipcRenderer.send('audio:stop');
 
-    // Mock processing delay
+    // Mock processing delay (unchanged)
     setTimeout(() => {
         setIdle();
     }, 2000);
