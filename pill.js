@@ -20,12 +20,17 @@ function setLoading() {
     currentStateIndex = 2;
 }
 
-function cycleState() {
-    currentStateIndex = (currentStateIndex + 1) % states.length;
-    pill.className = 'pill ' + states[currentStateIndex];
-}
+// Listen for start recording (Hold Start)
+ipcRenderer.on('start-recording', () => {
+    setRecording();
+});
 
-// Listen for cycle-state from main process (G key)
-ipcRenderer.on('cycle-state', () => {
-    cycleState();
+// Listen for stop recording (Release)
+ipcRenderer.on('stop-recording', () => {
+    setLoading();
+
+    // Mock processing delay
+    setTimeout(() => {
+        setIdle();
+    }, 2000);
 });

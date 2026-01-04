@@ -54,17 +54,44 @@ function createPillWindow() {
 app.whenReady().then(() => {
     createPillWindow();
 
-    // Register global 'G' key to cycle states
-    globalShortcut.register('G', () => {
-        if (pillWindow) {
-            pillWindow.webContents.send('cycle-state');
+    /* 
+       Using uiohook-napi for global key release detection (Hold-to-Talk).
+       This allows us to detect when the user *releases* keys.
+    */
+    const { uIOhook, UiohookKey } = require('uiohook-napi');
+
+    let isCtrlPressed = false;
+    let isSpacePressed = false;
+    let isRecording = false;
+
+    uIOhook.on('keydown', (e) => {
+        if (e.keycode === UiohookKey.Ctrl) isCtrlPressed = true;
+        if (e.keycode === UiohookKey.Space) isSpacePressed = true;
+
+        if (isCtrlPressed && isSpacePressed && !isRecording) {
+            isRecording = true;
+            if (pillWindow) pillWindow.webContents.send('start-recording');
         }
     });
+
+    uIOhook.on('keyup', (e) => {
+        if (e.keycode === UiohookKey.Ctrl) isCtrlPressed = false;
+        if (e.keycode === UiohookKey.Space) isSpacePressed = false;
+
+        // If either key is released, stop recording
+        if ((!isCtrlPressed || !isSpacePressed) && isRecording) {
+            isRecording = false;
+            if (pillWindow) pillWindow.webContents.send('stop-recording');
+        }
+    });
+
+    uIOhook.start();
 });
 
-// Unregister shortcuts on quit
+// Clean up hook on quit
 app.on('will-quit', () => {
-    globalShortcut.unregisterAll();
+    // We don't need to explicitly stop uIOhook here as the process is dying,
+    // but unregistering globalShortcut is good practice if any were used.
 });
 
 app.on('window-all-closed', () => {

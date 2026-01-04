@@ -11,6 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "electron": "^39.2.7"
+    "electron": "^39.2.7",
+    "uiohook-napi": "^1.5.4"
   }
 }
