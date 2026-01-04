@@ -1,0 +1,206 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    /* Anchor to bottom */
+    padding-bottom: 10px;
+    /* Buffer from bottom */
+}
+
+/*
+ * PILL SIZE REFERENCE:
+ * ------------------------------------------
+ * Idle:      45px × 12px  (Radius 6px)
+ * Recording: 75px × 28px  (Radius 14px)
+ * Loading:   75px × 28px  (Radius 14px)
+ * ------------------------------------------
+ */
+
+.pill {
+    position: relative;
+    /* Container for absolute children */
+    height: 12px;
+    background-color: rgba(26, 26, 26, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    overflow: hidden;
+
+    /* Flexbox fallback (though we use absolute children now) */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    /* Transform origin for bottom-center expansion */
+    transform-origin: bottom center;
+
+    /* Elastic easing */
+    transition: width 600ms cubic-bezier(0.175, 0.885, 0.32, 1.4),
+        height 600ms cubic-bezier(0.175, 0.885, 0.32, 1.4),
+        border-radius 600ms cubic-bezier(0.175, 0.885, 0.32, 1.4),
+        background-color 200ms ease-out;
+}
+
+/* ===================
+   STATES
+   =================== */
+
+.pill.idle {
+    width: 45px;
+    height: 12px;
+}
+
+/* Recording & Loading: 75px x 28px */
+.pill.recording,
+.pill.loading {
+    width: 75px;
+    height: 28px;
+    border-radius: 14px;
+}
+
+/* ===================
+   INNER ELEMENTS (Robust Centering)
+   =================== */
+
+.waveform,
+.spinner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+
+    /* Use flexbox to center content strictly */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    pointer-events: none;
+
+    /* Animation State: Start hidden */
+    opacity: 0;
+    transform: scale(0.5);
+    /* Pop effect */
+    transition: all 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Active States */
+.pill.recording .waveform {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.pill.loading .spinner {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Explicit hide for safety */
+.pill.idle .waveform,
+.pill.idle .spinner,
+.pill.loading .waveform,
+.pill.recording .spinner {
+    /* Don't use display:none if we want fade out transition */
+    /* But to prevent clicking or interference, opacity 0 handles it. */
+}
+
+/* ===================
+   WAVEFORM VISUALS
+   =================== */
+
+.waveform {
+    gap: 4px;
+}
+
+.waveform .bar {
+    width: 3px;
+    height: 8px;
+    /* Base height */
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 2px;
+    animation: waveform-bounce 600ms ease-in-out infinite;
+}
+
+.waveform .bar:nth-child(1) {
+    animation-delay: 0ms;
+}
+
+.waveform .bar:nth-child(2) {
+    animation-delay: 150ms;
+}
+
+.waveform .bar:nth-child(3) {
+    animation-delay: 300ms;
+}
+
+.waveform .bar:nth-child(4) {
+    animation-delay: 450ms;
+}
+
+@keyframes waveform-bounce {
+
+    0%,
+    100% {
+        height: 8px;
+    }
+
+    50% {
+        height: 16px;
+    }
+}
+
+/* ===================
+   SPINNER VISUALS
+   =================== */
+
+.spinner-ring {
+    /* Renamed to avoid class conflict if any */
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    animation: spin 700ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Update index.html to use this inner wrapper for spinner? 
+   No, just style .spinner directly if it's the element.
+   BUT, .spinner is now the full-size container. 
+   So I need an inner element for the actual ring? 
+   OR I can use pseudo-element?
+   OR I can just style the container... wait.
+   If .spinner is the container (100% w/h), it can't be the ring itself (border).
+   
+   I need to update index.html to add a child to .spinner OR use ::after.
+*/
+
+.spinner::after {
+    content: '';
+    display: block;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    animation: spin 700ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}

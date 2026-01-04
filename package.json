@@ -1,0 +1,16 @@
+{
+  "name": "wispr-local",
+  "version": "1.0.0",
+  "description": "Floating pill UI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "electron": "^39.2.7"
+  }
+}
