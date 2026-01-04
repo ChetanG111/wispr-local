@@ -223,6 +223,7 @@ body {
     color: var(--text-primary);
     font-size: 13px;
     line-height: 1.45;
+    white-space: pre-wrap;
     /* 3 line clamp */
     display: -webkit-box;
     -webkit-line-clamp: 3;
@@ -317,6 +318,130 @@ body {
 .action-btn svg {
     width: 16px;
     height: 16px;
+}
+
+/* Rerun Button Icon Animation */
+.rerun-btn {
+    position: relative;
+    /* Rerun appears first */
+    transition-delay: 0ms;
+}
+
+/* Stagger copy and delete after rerun */
+.copy-btn {
+    transition-delay: 40ms;
+}
+
+.delete-btn {
+    transition-delay: 80ms;
+}
+
+.rerun-btn .icon-rerun,
+.rerun-btn .icon-check {
+    position: absolute;
+    transition:
+        opacity var(--duration-normal) var(--ease-out-expo),
+        transform var(--duration-normal) var(--ease-out-back);
+}
+
+.rerun-btn .icon-rerun {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.rerun-btn .icon-check {
+    opacity: 0;
+    transform: scale(0.5);
+}
+
+/* Loading State (Spinning) */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.rerun-btn.loading .icon-rerun {
+    animation: spin 1s linear infinite;
+    pointer-events: none;
+}
+
+/* Success State - swap icons */
+.rerun-btn.success .icon-rerun {
+    opacity: 0;
+    transform: scale(0.5);
+    animation: none;
+}
+
+.rerun-btn.success .icon-check {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Rerun Button Icon Animation */
+.rerun-btn {
+    position: relative;
+    /* Rerun appears first */
+    transition-delay: 0ms;
+}
+
+/* Stagger copy and delete after rerun */
+.copy-btn {
+    transition-delay: 40ms;
+}
+
+.delete-btn {
+    transition-delay: 80ms;
+}
+
+.rerun-btn .icon-rerun,
+.rerun-btn .icon-check {
+    position: absolute;
+    transition:
+        opacity var(--duration-normal) var(--ease-out-expo),
+        transform var(--duration-normal) var(--ease-out-back);
+}
+
+.rerun-btn .icon-rerun {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.rerun-btn .icon-check {
+    opacity: 0;
+    transform: scale(0.5);
+}
+
+/* Loading State (Spinning) */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.rerun-btn.loading .icon-rerun {
+    animation: spin 1s linear infinite;
+    pointer-events: none;
+}
+
+/* Success State - swap icons */
+.rerun-btn.success .icon-rerun {
+    opacity: 0;
+    transform: scale(0.5);
+    animation: none;
+}
+
+.rerun-btn.success .icon-check {
+    opacity: 1;
+    transform: scale(1);
 }
 
 /* Copy Button Icon Animation */

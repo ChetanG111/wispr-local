@@ -4,6 +4,7 @@ const fs = require('fs');
 const audioRecorder = require('./audioRecorder');
 const { transcribe } = require('./whisperRunner');
 const db = require('./db');
+const { format } = require('./formatter');
 
 let pillWindow;
 let transcriptWindow;
@@ -190,12 +191,16 @@ app.whenReady().then(() => {
                     const text = await transcribe(result.filePath);
                     console.log('[main] Transcription result:', text);
 
-                    // Save to database (raw_text = final_text, no processing)
+                    // Apply formatting
+                    const formattedText = format(text);
+                    console.log('[main] Formatted text:', formattedText);
+
+                    // Save to database
                     db.insertTranscript({
                         created_at: new Date().toISOString(),
                         audio_path: result.filePath,
                         raw_text: text,
-                        final_text: text,
+                        final_text: formattedText,
                         duration_ms: null,
                         model: 'whisper.cpp base',
                         status: 'ok'
@@ -203,7 +208,7 @@ app.whenReady().then(() => {
 
                     // Send transcription to renderer
                     if (pillWindow) {
-                        pillWindow.webContents.send('transcription-complete', text);
+                        pillWindow.webContents.send('transcription-complete', formattedText);
                     }
                 } catch (transcribeErr) {
                     console.error('[main] Transcription failed:', transcribeErr.message);
@@ -261,6 +266,30 @@ app.whenReady().then(() => {
         }
 
         return { success: true };
+    });
+
+    // IPC handler for re-running formatting on a transcript
+    ipcMain.handle('transcript:rerun', (event, id) => {
+        console.log('[main] Rerunning formatting for id:', id);
+        const transcript = db.getTranscriptById(id);
+
+        if (!transcript) {
+            throw new Error(`Transcript id=${id} not found`);
+        }
+
+        // Apply formatting rules to raw_text
+        const formattedText = format(transcript.raw_text);
+
+        // Update final_text in database
+        db.updateFinalText(id, formattedText);
+
+        console.log('[main] Rerun complete, updated final_text');
+
+        // Return full updated transcript record
+        return {
+            ...transcript,
+            final_text: formattedText
+        };
     });
 });
 

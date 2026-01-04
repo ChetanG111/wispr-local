@@ -66,7 +66,19 @@
                     <p class="entry-text">${escapeHtml(transcript.final_text || '')}</p>
                 </div>
                 <div class="entry-actions">
-                    <button class="action-btn copy-btn" aria-label="Copy transcript">
+                    <button class="action-btn rerun-btn" aria-label="Rerun formatting" title="Rerun Formatting">
+                        <svg class="icon-rerun" width="16" height="16" viewBox="0 0 24 24" fill="none" 
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M23 4v6h-6"></path>
+                            <path d="M1 20v-6h6"></path>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                        <svg class="icon-check" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </button>
+                    <button class="action-btn copy-btn" aria-label="Copy transcript" title="Copy Text">
                         <svg class="icon-copy" width="16" height="16" viewBox="0 0 24 24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -77,7 +89,7 @@
                             <polyline points="20 6 9 17 4 12"></polyline>
                         </svg>
                     </button>
-                    <button class="action-btn delete-btn" aria-label="Delete transcript">
+                    <button class="action-btn delete-btn" aria-label="Delete transcript" title="Delete">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="3 6 5 6 21 6"></polyline>
@@ -148,8 +160,16 @@
      */
     function attachEntryListeners() {
         document.querySelectorAll('.transcript-entry').forEach(entry => {
+            const rerunBtn = entry.querySelector('.rerun-btn');
             const copyBtn = entry.querySelector('.copy-btn');
             const deleteBtn = entry.querySelector('.delete-btn');
+
+            if (rerunBtn) {
+                rerunBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleRerun(entry, rerunBtn);
+                });
+            }
 
             if (copyBtn) {
                 copyBtn.addEventListener('click', (e) => {
@@ -165,6 +185,84 @@
                 });
             }
         });
+    }
+
+    /**
+     * Handle rerun button click
+     */
+    async function handleRerun(entry, rerunBtn) {
+        const id = parseInt(entry.dataset.id, 10);
+        const textElement = entry.querySelector('.entry-text');
+
+        // Prevent multiple clicks
+        if (rerunBtn.classList.contains('loading')) {
+            return;
+        }
+
+        // Add loading state (spin animation)
+        rerunBtn.classList.add('loading');
+
+        try {
+            const updatedTranscript = await ipcRenderer.invoke('transcript:rerun', id);
+            console.log('[transcript-window] Rerun complete for id:', id);
+
+            // Update text in UI
+            if (updatedTranscript && updatedTranscript.final_text) {
+                textElement.textContent = updatedTranscript.final_text;
+            }
+
+            // Show success tick
+            rerunBtn.classList.remove('loading');
+            rerunBtn.classList.add('success');
+
+            // Reset after 1.5s
+            setTimeout(() => {
+                rerunBtn.classList.remove('success');
+            }, 1500);
+
+        } catch (err) {
+            console.error('[transcript-window] Failed to rerun:', err);
+            rerunBtn.classList.remove('loading');
+        }
+    }
+
+    /**
+     * Handle rerun button click
+     */
+    async function handleRerun(entry, rerunBtn) {
+        const id = parseInt(entry.dataset.id, 10);
+        const textElement = entry.querySelector('.entry-text');
+
+        // Prevent multiple clicks
+        if (rerunBtn.classList.contains('loading')) {
+            return;
+        }
+
+        // Add loading state (spin animation)
+        rerunBtn.classList.add('loading');
+
+        try {
+            const updatedTranscript = await ipcRenderer.invoke('transcript:rerun', id);
+            console.log('[transcript-window] Rerun complete for id:', id);
+
+            // Update text in UI
+            if (updatedTranscript && updatedTranscript.final_text) {
+                textElement.textContent = updatedTranscript.final_text;
+            }
+
+            // Show success tick
+            rerunBtn.classList.remove('loading');
+            rerunBtn.classList.add('success');
+
+            // Reset after 1.5s
+            setTimeout(() => {
+                rerunBtn.classList.remove('success');
+            }, 1500);
+
+        } catch (err) {
+            console.error('[transcript-window] Failed to rerun:', err);
+            rerunBtn.classList.remove('loading');
+        }
     }
 
     /**

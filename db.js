@@ -97,6 +97,52 @@ function getHistory(limit = 50) {
 }
 
 /**
+ * Get a single transcript by id
+ * @param {number} id - Transcript id
+ * @returns {Object|null} - Transcript object or null if not found
+ */
+function getTranscriptById(id) {
+    const stmt = db.prepare(`
+        SELECT id, created_at, audio_path, raw_text, final_text, duration_ms, model, status
+        FROM transcripts
+        WHERE id = ?
+    `);
+
+    const row = stmt.get(id);
+    if (!row) {
+        console.log(`[db] Transcript id=${id} not found`);
+        return null;
+    }
+
+    console.log(`[db] Retrieved transcript id=${id}`);
+    return row;
+}
+
+/**
+ * Update only the final_text of a transcript (for rerun)
+ * @param {number} id - Transcript id
+ * @param {string} finalText - New formatted text
+ * @returns {boolean} - true if updated, false if not found
+ */
+function updateFinalText(id, finalText) {
+    const stmt = db.prepare(`
+        UPDATE transcripts
+        SET final_text = ?
+        WHERE id = ?
+    `);
+
+    const result = stmt.run(finalText, id);
+
+    if (result.changes === 0) {
+        console.log(`[db] Transcript id=${id} not found for update`);
+        return false;
+    }
+
+    console.log(`[db] Updated final_text for transcript id=${id}`);
+    return true;
+}
+
+/**
  * Delete a transcript by id
  * @param {number} id - Transcript id to delete
  * @returns {string|null} - audio_path of deleted record (for file cleanup), or null if not found
@@ -130,6 +176,8 @@ function close() {
 module.exports = {
     insertTranscript,
     getHistory,
+    getTranscriptById,
+    updateFinalText,
     deleteTranscript,
     close
 };
