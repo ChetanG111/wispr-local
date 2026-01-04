@@ -1,0 +1,509 @@
+/* ============================================
+   TRANSCRIPT WINDOW - PREMIUM DARK MODE
+   Apple-style animations with cubic-bezier
+   ============================================ */
+
+/* CSS Custom Properties */
+:root {
+    /* Colors - Dark Theme */
+    --bg-primary: #0a0a0a;
+    --bg-secondary: #141414;
+    --bg-entry: #1a1a1a;
+    --bg-entry-hover: #222222;
+    --bg-button: #2a2a2a;
+    --bg-button-hover: #3a3a3a;
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.6);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-button: 0 2px 6px rgba(0, 0, 0, 0.5);
+
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 20px;
+
+    /* Border Radius */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 28px;
+    /* Squircle radius */
+    --radius-full: 50%;
+
+    /* Apple-style Cubic Bezier Curves */
+    /* Fast response, slow settle with subtle overshoot */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-out-back-subtle: cubic-bezier(0.34, 1.2, 0.64, 1);
+    --ease-in-out-smooth: cubic-bezier(0.65, 0, 0.35, 1);
+
+    /* Timing */
+    --duration-fast: 150ms;
+    --duration-normal: 250ms;
+    --duration-slow: 350ms;
+
+    /* Entry dimensions */
+    --entry-height: 80px;
+}
+
+/* Reset & Base */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Padding to show rounded corners of inner container */
+    padding: 8px;
+}
+
+/* Window Container - Squircle Shape */
+.window-container {
+    height: 100%;
+    width: 100%;
+    background: var(--bg-primary);
+    /* iOS-style squircle using large smooth border-radius */
+    border-radius: var(--radius-xl);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    /* Subtle border for definition against transparent background */
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    /* Box sizing to include border in dimensions */
+    box-sizing: border-box;
+}
+
+/* Header */
+.header {
+    padding: var(--spacing-xl) var(--spacing-xl);
+    padding-bottom: var(--spacing-md);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    /* Draggable region for frameless window */
+    -webkit-app-region: drag;
+}
+
+.header-title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    color: var(--text-primary);
+}
+
+/* Close Button */
+.close-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-app-region: no-drag;
+
+    transition:
+        color var(--duration-fast) var(--ease-out-expo),
+        background-color var(--duration-fast) var(--ease-out-expo),
+        scale var(--duration-fast) var(--ease-out-back-subtle);
+}
+
+.close-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.close-btn:active {
+    scale: 0.9;
+}
+
+/* Transcript List */
+.transcript-list {
+    flex: 1;
+    padding: 0 var(--spacing-lg);
+    padding-bottom: var(--spacing-xl);
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Hide scrollbar but keep functionality */
+.transcript-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.transcript-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.transcript-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
+
+.transcript-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* Transcript Entry */
+.transcript-entry {
+    position: relative;
+    height: var(--entry-height);
+    background: var(--bg-entry);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    cursor: default;
+    overflow: hidden;
+
+    /* Transition for hover lift effect */
+    transform: translateY(0);
+    transition:
+        transform var(--duration-normal) var(--ease-out-back-subtle),
+        background-color var(--duration-normal) var(--ease-out-expo),
+        box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+
+.transcript-entry:hover {
+    background: var(--bg-entry-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-soft);
+}
+
+/* Entry Content */
+.entry-content {
+    flex: 1;
+    min-width: 0;
+    padding-right: var(--spacing-xl);
+    position: relative;
+    height: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.entry-text {
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
+    /* 3 line clamp */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Overflow Fade */
+.entry-content::after {
+    content: '';
+    position: absolute;
+    right: var(--spacing-xl);
+    top: 0;
+    height: 100%;
+    width: 40px;
+    background: linear-gradient(to right, transparent, var(--bg-entry));
+    pointer-events: none;
+    transition: background var(--duration-normal) var(--ease-out-expo);
+}
+
+.transcript-entry:hover .entry-content::after {
+    background: linear-gradient(to right, transparent, var(--bg-entry-hover));
+}
+
+/* Entry Actions */
+.entry-actions {
+    position: absolute;
+    right: var(--spacing-md);
+    display: flex;
+    gap: var(--spacing-xs);
+    align-items: center;
+}
+
+/* Action Buttons */
+.action-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--bg-button);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-button);
+
+    /* Hidden by default */
+    opacity: 0;
+    transform: translateX(8px);
+    pointer-events: none;
+
+    /* Button hover transition */
+    transition:
+        opacity var(--duration-normal) var(--ease-out-expo),
+        transform var(--duration-normal) var(--ease-out-back),
+        background-color var(--duration-fast) var(--ease-out-expo),
+        scale var(--duration-fast) var(--ease-out-back-subtle);
+
+    -webkit-app-region: no-drag;
+}
+
+/* Staggered appearance - Copy first */
+.copy-btn {
+    transition-delay: 0ms;
+}
+
+/* Delete appears after Copy */
+.delete-btn {
+    transition-delay: 50ms;
+}
+
+/* Show buttons on entry hover */
+.transcript-entry:hover .action-btn {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+
+/* Button hover state */
+.action-btn:hover {
+    background: var(--bg-button-hover);
+    scale: 1.08;
+}
+
+.action-btn:active {
+    scale: 0.95;
+    transition-duration: 100ms;
+}
+
+.action-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Copy Button Icon Animation */
+.copy-btn {
+    position: relative;
+}
+
+.copy-btn .icon-copy,
+.copy-btn .icon-check {
+    position: absolute;
+    transition:
+        opacity var(--duration-normal) var(--ease-out-expo),
+        transform var(--duration-normal) var(--ease-out-back);
+}
+
+.copy-btn .icon-copy {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.copy-btn .icon-check {
+    opacity: 0;
+    transform: scale(0.5);
+}
+
+/* Copied state - swap icons */
+.copy-btn.copied .icon-copy {
+    opacity: 0;
+    transform: scale(0.5);
+}
+
+.copy-btn.copied .icon-check {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Settings Button */
+.settings-btn {
+    position: absolute;
+    bottom: var(--spacing-lg);
+    left: var(--spacing-lg);
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    transition:
+        color var(--duration-fast) var(--ease-out-expo),
+        background-color var(--duration-fast) var(--ease-out-expo),
+        scale var(--duration-fast) var(--ease-out-back-subtle),
+        box-shadow var(--duration-fast) var(--ease-out-expo);
+
+    -webkit-app-region: no-drag;
+}
+
+.settings-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-button);
+    box-shadow: var(--shadow-button);
+}
+
+.settings-btn:active {
+    scale: 0.92;
+}
+
+.settings-btn.active {
+    color: var(--text-primary);
+    background: var(--bg-button);
+}
+
+/* Settings Popover */
+.settings-popover {
+    position: absolute;
+    bottom: calc(var(--spacing-lg) + 44px);
+    left: var(--spacing-lg);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-subtle);
+    min-width: 160px;
+    overflow: hidden;
+    z-index: 100;
+
+    /* Hidden by default */
+    opacity: 0;
+    transform: scale(0.9);
+    transform-origin: bottom left;
+    pointer-events: none;
+
+    transition:
+        opacity var(--duration-normal) var(--ease-out-expo),
+        transform var(--duration-normal) var(--ease-out-back-subtle);
+
+    -webkit-app-region: no-drag;
+}
+
+.settings-popover.visible {
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+}
+
+.popover-content {
+    padding: var(--spacing-xs) 0;
+}
+
+.popover-item {
+    padding: var(--spacing-sm) var(--spacing-md);
+    cursor: pointer;
+
+    transition: background-color var(--duration-fast) var(--ease-out-expo);
+}
+
+.popover-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.popover-item:active {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.popover-label {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-primary);
+}
+
+.popover-divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: var(--spacing-xs) 0;
+}
+
+/* Entry appear animation (for dynamic loading) */
+@keyframes entryAppear {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.transcript-entry {
+    animation: entryAppear var(--duration-slow) var(--ease-out-back-subtle) backwards;
+}
+
+.transcript-entry:nth-child(1) {
+    animation-delay: 0ms;
+}
+
+.transcript-entry:nth-child(2) {
+    animation-delay: 40ms;
+}
+
+.transcript-entry:nth-child(3) {
+    animation-delay: 80ms;
+}
+
+.transcript-entry:nth-child(4) {
+    animation-delay: 120ms;
+}
+
+.transcript-entry:nth-child(5) {
+    animation-delay: 160ms;
+}
+
+.transcript-entry:nth-child(6) {
+    animation-delay: 200ms;
+}
+
+.transcript-entry:nth-child(7) {
+    animation-delay: 240ms;
+}
+
+.transcript-entry:nth-child(8) {
+    animation-delay: 280ms;
+}
+
+/* Focus states for accessibility */
+.action-btn:focus-visible,
+.settings-btn:focus-visible,
+.popover-item:focus-visible {
+    outline: 2px solid var(--text-primary);
+    outline-offset: 2px;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

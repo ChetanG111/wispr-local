@@ -2,6 +2,7 @@ const { app, BrowserWindow, screen, globalShortcut, ipcMain } = require('electro
 const path = require('path');
 
 let pillWindow;
+let transcriptWindow;
 
 function createPillWindow() {
     const display = screen.getPrimaryDisplay();
@@ -51,8 +52,61 @@ function createPillWindow() {
     });
 }
 
+function createTranscriptWindow() {
+    const display = screen.getPrimaryDisplay();
+    const workArea = display.workAreaSize;
+
+    // Reasonable floating window size (not fullscreen)
+    const windowWidth = 380;
+    const windowHeight = 520;
+
+    // Center the window on screen
+    const centerX = Math.round((workArea.width - windowWidth) / 2);
+    const centerY = Math.round((workArea.height - windowHeight) / 2);
+
+    transcriptWindow = new BrowserWindow({
+        width: windowWidth,
+        height: windowHeight,
+        x: centerX,
+        y: centerY,
+        transparent: true,
+        frame: false,
+        resizable: true,
+        minWidth: 320,
+        minHeight: 400,
+        maxWidth: 600,
+        maxHeight: 800,
+        show: false, // Hidden by default
+        skipTaskbar: false,
+        hasShadow: false, // Disable window shadow for clean edges
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false
+        }
+    });
+
+    transcriptWindow.loadFile('transcript-window.html');
+
+    // Handle window close - hide instead of destroy
+    transcriptWindow.on('close', (e) => {
+        if (!app.isQuitting) {
+            e.preventDefault();
+            transcriptWindow.hide();
+        }
+    });
+}
+
+// Helper to show transcript window (can be called from IPC or menu)
+function showTranscriptWindow() {
+    if (transcriptWindow) {
+        transcriptWindow.show();
+        transcriptWindow.focus();
+    }
+}
+
 app.whenReady().then(() => {
     createPillWindow();
+    createTranscriptWindow();
 
     /* 
        Using uiohook-napi for global key release detection (Hold-to-Talk).
@@ -86,6 +140,25 @@ app.whenReady().then(() => {
     });
 
     uIOhook.start();
+
+    // Register global shortcut to toggle transcript window (Ctrl+Shift+T)
+    globalShortcut.register('CommandOrControl+Shift+T', () => {
+        if (transcriptWindow) {
+            if (transcriptWindow.isVisible()) {
+                transcriptWindow.hide();
+            } else {
+                transcriptWindow.show();
+                transcriptWindow.focus();
+            }
+        }
+    });
+
+    // IPC handler for close button in transcript window
+    ipcMain.on('hide-transcript-window', () => {
+        if (transcriptWindow) {
+            transcriptWindow.hide();
+        }
+    });
 });
 
 // Clean up hook on quit
