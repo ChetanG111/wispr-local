@@ -1,4 +1,5 @@
 const { ipcRenderer } = require('electron');
+const sound = require('./sound');
 
 const pill = document.getElementById('pill');
 
@@ -85,18 +86,44 @@ function setLoading() {
     currentStateIndex = 2;
 }
 
+// State tracking for delayed recording
+let recordingDelayTimer = null;
+let isRecordingActive = false;
+
 // Listen for start recording (Hold Start)
 ipcRenderer.on('start-recording', () => {
-    setRecording();
-    // Notify main process to start audio capture
-    ipcRenderer.send('audio:start');
+    sound.play('start');
+    setRecording(); // Visual feedback immediately
+
+    // Delay actual audio capture to allow sound to play and user to settle (300ms)
+    recordingDelayTimer = setTimeout(() => {
+        isRecordingActive = true;
+        ipcRenderer.send('audio:start');
+        recordingDelayTimer = null;
+    }, 300);
 });
 
 // Listen for stop recording (Release)
 ipcRenderer.on('stop-recording', () => {
-    setLoading();
-    // Notify main process to stop audio capture
-    ipcRenderer.send('audio:stop');
+    sound.play('stop');
+
+    if (recordingDelayTimer) {
+        // User released key too quickly (Tap) - Cancel recording
+        clearTimeout(recordingDelayTimer);
+        recordingDelayTimer = null;
+        isRecordingActive = false;
+
+        setIdle(); // Reset UI immediately
+        showInfo('<span>Hold Space to record</span>', 2000);
+    } else if (isRecordingActive) {
+        // Normal flow: Recording was active, now stop it
+        setLoading();
+        ipcRenderer.send('audio:stop');
+        isRecordingActive = false;
+    } else {
+        // Fallback
+        setIdle();
+    }
 });
 
 // Listen for generic notification requests
