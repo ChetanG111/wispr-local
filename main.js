@@ -21,8 +21,8 @@ function createPillWindow() {
     const workArea = display.workAreaSize;
 
     // Window size (Large enough to allow for animation overshoot/bounce without clipping)
-    const windowWidth = 150;
-    const windowHeight = 60;
+    const windowWidth = 600;
+    const windowHeight = 120;
 
     // Center of screen = screenBounds.width / 2
     // Window x = center of screen - half of window width
@@ -226,6 +226,14 @@ if (!gotTheLock) {
             }
         });
 
+        // IPC handler for mouse event forwarding/ignoring (Click-through)
+        ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
+            const win = BrowserWindow.fromWebContents(event.sender);
+            if (win) {
+                win.setIgnoreMouseEvents(ignore, options);
+            }
+        });
+
         // IPC handlers for audio recording
         ipcMain.on('audio:start', () => {
             console.log('[main] Received audio:start');
@@ -264,6 +272,28 @@ if (!gotTheLock) {
                         const text = await whisperRunner.transcribe(result.filePath);
                         console.log('[main] Transcription result:', text);
                         logger.log(`[main] Transcription result length: ${text.length}`);
+
+                        // Handle Blank Audio / Empty Transcription
+                        if (!text || text.trim().length === 0) {
+                            console.log('[main] Blank audio detected. Deleting file and skipping save.');
+                            logger.log('[main] Blank audio detected. Cleaning up.');
+
+                            // Delete the audio file
+                            try {
+                                if (fs.existsSync(result.filePath)) {
+                                    fs.unlinkSync(result.filePath);
+                                    console.log('[main] Deleted blank audio file:', result.filePath);
+                                }
+                            } catch (cleanupErr) {
+                                console.error('[main] Failed to delete blank audio file:', cleanupErr);
+                            }
+
+                            // Notify renderer with empty string to trigger "No speech detected" popup
+                            if (pillWindow) {
+                                pillWindow.webContents.send('transcription-complete', '');
+                            }
+                            return; // Stop processing
+                        }
 
                         // Apply formatting
                         const formattedText = format(text);
