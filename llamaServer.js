@@ -15,7 +15,6 @@ const logger = require('./logger');
 const http = require('http');
 
 let serverProcess = null;
-let serverPort = 8089;
 let isStarting = false;
 
 // Configuration
@@ -52,7 +51,11 @@ function start(executablePath, modelPath, onReady) {
     try {
         serverProcess = spawn(executablePath, args, {
             windowsHide: true,
-            stdio: ['ignore', 'ignore', 'ignore']
+            stdio: ['ignore', 'ignore', 'pipe']
+        });
+
+        serverProcess.stderr.on('data', (data) => {
+            logger.error(`[llama-server] ${data.toString()}`);
         });
 
         serverProcess.on('spawn', () => {

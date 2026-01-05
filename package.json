@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "postinstall": "electron-builder install-app-deps && patch-package",
-    "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource=paste.vbs --extra-resource=whisper"
+    "dist": "electron-packager . --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource=paste.vbs --extra-resource=whisper --extra-resource=models"
   },
   "build": {
     "productName": "Wispr Local",

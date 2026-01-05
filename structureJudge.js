@@ -16,7 +16,7 @@ const ENDPOINT_HOST = '127.0.0.1';
 const ENDPOINT_PORT = 8089;
 const ENDPOINT_PATH = '/v1/chat/completions';
 
-const TIMEOUT_MS = 2500; // Adjusted for CPU (was 800ms)
+const TIMEOUT_MS = 8000; // Adjusted for CPU (was 800ms)
 
 const SYSTEM_PROMPT = `# Speech-to-Text Refinement System
 

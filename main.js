@@ -224,11 +224,23 @@ if (!gotTheLock) {
 
             if (isCtrlPressed && isSpacePressed && !isRecording) {
                 isRecording = true;
+
+                // Start recording IMMEDIATELY in main process to minimize latency
+                console.log('[main] Keydown detected, starting audio capture immediately');
+                logger.log('[main] Keydown detected, starting audio capture');
+                try {
+                    audioRecorder.startRecording();
+                } catch (err) {
+                    console.error('[main] Failed to start recording:', err.message);
+                    logger.error(`[main] Failed to start recording: ${err.message}`);
+                    isRecording = false; // Reset state so user can try again
+                }
+
                 if (pillWindow) pillWindow.webContents.send('start-recording');
             }
         });
 
-        uIOhook.on('keyup', (e) => {
+        uIOhook.on('keyup', async (e) => {
             if (e.keycode === UiohookKey.Ctrl) isCtrlPressed = false;
             if (e.keycode === UiohookKey.Space) isSpacePressed = false;
 
@@ -236,6 +248,178 @@ if (!gotTheLock) {
             if ((!isCtrlPressed || !isSpacePressed) && isRecording) {
                 isRecording = false;
                 if (pillWindow) pillWindow.webContents.send('stop-recording');
+
+                // Stop recording logic moved here from IPC handler
+                console.log('[main] Keyup detected, stopping audio capture');
+                logger.log('[main] Keyup detected, stopping audio capture');
+
+                try {
+                    const result = audioRecorder.stopRecording();
+                    if (result && result.filePath) {
+                        console.log('[main] Recording saved:', result.filePath);
+                        logger.log(`[main] Recording saved: ${result.filePath}`);
+
+                        // Small delay to ensure WAV file is fully written
+                        await new Promise(resolve => setTimeout(resolve, 200));
+
+                        if (!fs.existsSync(result.filePath)) {
+                            logger.error(`[main] Recording file not found on disk: ${result.filePath}`);
+                            if (pillWindow) pillWindow.webContents.send('transcription-complete', '');
+                            return;
+                        }
+
+                        // Run Whisper transcription
+                        console.log('[main] Starting Whisper transcription...');
+                        logger.log('[main] Starting Whisper transcription...');
+                        try {
+                            const text = await whisperRunner.transcribe(result.filePath);
+                            console.log('[main] Transcription result:', text);
+                            logger.log(`[main] Transcription result length: ${text.length}`);
+
+                            // Handle Blank Audio / Empty Transcription
+                            if (!text || text.trim().length === 0) {
+                                console.log('[main] Blank audio detected. Deleting file and skipping save.');
+                                logger.log('[main] Blank audio detected. Cleaning up.');
+
+                                // Delete the audio file
+                                try {
+                                    if (fs.existsSync(result.filePath)) {
+                                        fs.unlinkSync(result.filePath);
+                                        console.log('[main] Deleted blank audio file:', result.filePath);
+                                    }
+                                } catch (cleanupErr) {
+                                    console.error('[main] Failed to delete blank audio file:', cleanupErr);
+                                }
+
+                                // Notify renderer with empty string to trigger "No speech detected" popup
+                                if (pillWindow) {
+                                    pillWindow.webContents.send('transcription-complete', '');
+                                }
+                                return; // Stop processing
+                            }
+
+                            // Apply formatting
+                            // Apply soft formatting (rules)
+                            const softFormattedText = format(text);
+                            logger.log('[main] Soft formatting applied');
+
+                            // Apply Structure Judge (Llama)
+                            // Pipeline: raw -> soft -> judge -> final
+                            let finalText = softFormattedText;
+                            try {
+                                finalText = await structureJudge.improve(text, softFormattedText);
+                                logger.log('[main] Structure judge complete');
+                            } catch (judgeErr) {
+                                console.error('[main] Judge failed, using soft format:', judgeErr);
+                                logger.error(`[main] Judge failed: ${judgeErr.message}`);
+                                finalText = softFormattedText;
+
+                                // Notify user of fallback
+                                if (pillWindow) {
+                                    pillWindow.webContents.send('show-notification', {
+                                        text: 'Structure Check Failed (Fallback Used)',
+                                        duration: 3000
+                                    });
+                                }
+                            }
+
+                            console.log('[main] Final text:', finalText);
+
+                            // Save to database
+                            db.insertTranscript({
+                                created_at: new Date().toISOString(),
+                                audio_path: result.filePath,
+                                raw_text: text,
+                                final_text: finalText,
+                                duration_ms: null,
+                                model: 'whisper.cpp base',
+                                status: 'ok'
+                            });
+
+                            // Auto-paste text
+                            try {
+                                const previousText = clipboard.readText();
+                                // Small delay to ensure clipboard is ready
+                                await new Promise(resolve => setTimeout(resolve, 50));
+                                clipboard.writeText(finalText);
+                                logger.log('[main] Clipboard updated with new text');
+
+                                // Execute VBScript to simulate Ctrl+V
+                                // Using VBScript because it's built-in and reliable on Windows without native node modules
+                                const vbsPath = app.isPackaged
+                                    ? path.join(process.resourcesPath, 'paste.vbs')
+                                    : path.join(__dirname, 'paste.vbs');
+
+                                logger.log(`[main] Executing paste script: ${vbsPath}`);
+                                execFile('wscript', [vbsPath], (error) => {
+                                    if (error) {
+                                        console.error('[main] Paste failed:', error.message);
+                                        logger.error(`[main] Paste script failed: ${error.message}`);
+                                    } else {
+                                        logger.log('[main] Paste script executed successfully');
+                                    }
+                                    // Restore clipboard after a delay to ensure paste has occurred
+                                    // Increased delay to 300ms to be safe
+                                    setTimeout(() => {
+                                        if (previousText) {
+                                            clipboard.writeText(previousText);
+                                        } else {
+                                            clipboard.clear();
+                                        }
+                                        logger.log('[main] Clipboard restored');
+                                    }, 300);
+                                });
+                            } catch (pasteErr) {
+                                console.error('[main] Auto-paste logic error:', pasteErr.message);
+                                logger.error(`[main] Auto-paste logic error: ${pasteErr.message}`);
+                            }
+
+                            // Send transcription to renderer (Pill)
+                            if (pillWindow) {
+                                pillWindow.webContents.send('transcription-complete', finalText);
+                            }
+
+                            // Refresh transcript window (History) if it exists
+                            if (transcriptWindow) {
+                                // Send event to reload history
+                                transcriptWindow.webContents.send('refresh-history');
+                            }
+                        } catch (transcribeErr) {
+                            console.error('[main] Transcription failed:', transcribeErr.message);
+                            logger.error(`[main] Transcription failed: ${transcribeErr.message}`);
+
+                            // Save error to database (keep WAV for debugging)
+                            db.insertTranscript({
+                                created_at: new Date().toISOString(),
+                                audio_path: result.filePath,
+                                raw_text: '',
+                                final_text: '',
+                                duration_ms: null,
+                                model: 'whisper.cpp base',
+                                status: 'error'
+                            });
+
+                            // Still notify renderer so it can reset state
+                            if (pillWindow) {
+                                pillWindow.webContents.send('transcription-complete', '');
+                            }
+                        }
+                    } else {
+                        // No file saved, send empty result
+                        console.log('[main] No recording file saved');
+                        logger.log('[main] No recording file saved from audioRecorder');
+                        if (pillWindow) {
+                            pillWindow.webContents.send('transcription-complete', '');
+                        }
+                    }
+                } catch (err) {
+                    console.error('[main] Failed to stop recording:', err.message);
+                    logger.error(`[main] Failed to stop recording handler: ${err.message}`);
+                    // Notify renderer on error
+                    if (pillWindow) {
+                        pillWindow.webContents.send('transcription-complete', '');
+                    }
+                }
             }
         });
 
@@ -257,189 +441,9 @@ if (!gotTheLock) {
         });
 
         // IPC handlers for audio recording
-        ipcMain.on('audio:start', () => {
-            console.log('[main] Received audio:start');
-            logger.log('[main] Received audio:start');
-            try {
-                audioRecorder.startRecording();
-            } catch (err) {
-                console.error('[main] Failed to start recording:', err.message);
-                logger.error(`[main] Failed to start recording: ${err.message}`);
-                dialog.showErrorBox('Recording Error', `Failed to start recording:\n${err.message}`);
-            }
-        });
+        // REMOVED: IPC handlers for audio recording (audio:start, audio:stop)
+        // These are now handled directly in uIOhook listener to reduce latency.
 
-        ipcMain.on('audio:stop', async () => {
-            console.log('[main] Received audio:stop');
-            logger.log('[main] Received audio:stop');
-            try {
-                const result = audioRecorder.stopRecording();
-                if (result && result.filePath) {
-                    console.log('[main] Recording saved:', result.filePath);
-                    logger.log(`[main] Recording saved: ${result.filePath}`);
-
-                    // Small delay to ensure WAV file is fully written
-                    await new Promise(resolve => setTimeout(resolve, 200));
-
-                    if (!fs.existsSync(result.filePath)) {
-                        logger.error(`[main] Recording file not found on disk: ${result.filePath}`);
-                        if (pillWindow) pillWindow.webContents.send('transcription-complete', '');
-                        return;
-                    }
-
-                    // Run Whisper transcription
-                    console.log('[main] Starting Whisper transcription...');
-                    logger.log('[main] Starting Whisper transcription...');
-                    try {
-                        const text = await whisperRunner.transcribe(result.filePath);
-                        console.log('[main] Transcription result:', text);
-                        logger.log(`[main] Transcription result length: ${text.length}`);
-
-                        // Handle Blank Audio / Empty Transcription
-                        if (!text || text.trim().length === 0) {
-                            console.log('[main] Blank audio detected. Deleting file and skipping save.');
-                            logger.log('[main] Blank audio detected. Cleaning up.');
-
-                            // Delete the audio file
-                            try {
-                                if (fs.existsSync(result.filePath)) {
-                                    fs.unlinkSync(result.filePath);
-                                    console.log('[main] Deleted blank audio file:', result.filePath);
-                                }
-                            } catch (cleanupErr) {
-                                console.error('[main] Failed to delete blank audio file:', cleanupErr);
-                            }
-
-                            // Notify renderer with empty string to trigger "No speech detected" popup
-                            if (pillWindow) {
-                                pillWindow.webContents.send('transcription-complete', '');
-                            }
-                            return; // Stop processing
-                        }
-
-                        // Apply formatting
-                        // Apply soft formatting (rules)
-                        const softFormattedText = format(text);
-                        logger.log('[main] Soft formatting applied');
-
-                        // Apply Structure Judge (Llama)
-                        // Pipeline: raw -> soft -> judge -> final
-                        let finalText = softFormattedText;
-                        try {
-                            finalText = await structureJudge.improve(text, softFormattedText);
-                            logger.log('[main] Structure judge complete');
-                        } catch (judgeErr) {
-                            console.error('[main] Judge failed, using soft format:', judgeErr);
-                            logger.error(`[main] Judge failed: ${judgeErr.message}`);
-                            finalText = softFormattedText;
-
-                            // Notify user of fallback
-                            if (pillWindow) {
-                                pillWindow.webContents.send('show-notification', {
-                                    text: 'Structure Check Failed (Fallback Used)',
-                                    duration: 3000
-                                });
-                            }
-                        }
-
-                        console.log('[main] Final text:', finalText);
-
-                        // Save to database
-                        db.insertTranscript({
-                            created_at: new Date().toISOString(),
-                            audio_path: result.filePath,
-                            raw_text: text,
-                            final_text: finalText,
-                            duration_ms: null,
-                            model: 'whisper.cpp base',
-                            status: 'ok'
-                        });
-
-                        // Auto-paste text
-                        try {
-                            const previousText = clipboard.readText();
-                            // Small delay to ensure clipboard is ready
-                            await new Promise(resolve => setTimeout(resolve, 50));
-                            clipboard.writeText(finalText);
-                            logger.log('[main] Clipboard updated with new text');
-
-                            // Execute VBScript to simulate Ctrl+V
-                            // Using VBScript because it's built-in and reliable on Windows without native node modules
-                            const vbsPath = app.isPackaged
-                                ? path.join(process.resourcesPath, 'paste.vbs')
-                                : path.join(__dirname, 'paste.vbs');
-
-                            logger.log(`[main] Executing paste script: ${vbsPath}`);
-                            execFile('wscript', [vbsPath], (error) => {
-                                if (error) {
-                                    console.error('[main] Paste failed:', error.message);
-                                    logger.error(`[main] Paste script failed: ${error.message}`);
-                                } else {
-                                    logger.log('[main] Paste script executed successfully');
-                                }
-                                // Restore clipboard after a delay to ensure paste has occurred
-                                // Increased delay to 300ms to be safe
-                                setTimeout(() => {
-                                    if (previousText) {
-                                        clipboard.writeText(previousText);
-                                    } else {
-                                        clipboard.clear();
-                                    }
-                                    logger.log('[main] Clipboard restored');
-                                }, 300);
-                            });
-                        } catch (pasteErr) {
-                            console.error('[main] Auto-paste logic error:', pasteErr.message);
-                            logger.error(`[main] Auto-paste logic error: ${pasteErr.message}`);
-                        }
-
-                        // Send transcription to renderer (Pill)
-                        if (pillWindow) {
-                            pillWindow.webContents.send('transcription-complete', finalText);
-                        }
-
-                        // Refresh transcript window (History) if it exists
-                        if (transcriptWindow) {
-                            // Send event to reload history
-                            transcriptWindow.webContents.send('refresh-history');
-                        }
-                    } catch (transcribeErr) {
-                        console.error('[main] Transcription failed:', transcribeErr.message);
-                        logger.error(`[main] Transcription failed: ${transcribeErr.message}`);
-
-                        // Save error to database (keep WAV for debugging)
-                        db.insertTranscript({
-                            created_at: new Date().toISOString(),
-                            audio_path: result.filePath,
-                            raw_text: '',
-                            final_text: '',
-                            duration_ms: null,
-                            model: 'whisper.cpp base',
-                            status: 'error'
-                        });
-
-                        // Still notify renderer so it can reset state
-                        if (pillWindow) {
-                            pillWindow.webContents.send('transcription-complete', '');
-                        }
-                    }
-                } else {
-                    // No file saved, send empty result
-                    console.log('[main] No recording file saved');
-                    logger.log('[main] No recording file saved from audioRecorder');
-                    if (pillWindow) {
-                        pillWindow.webContents.send('transcription-complete', '');
-                    }
-                }
-            } catch (err) {
-                console.error('[main] Failed to stop recording:', err.message);
-                logger.error(`[main] Failed to stop recording handler: ${err.message}`);
-                // Notify renderer on error
-                if (pillWindow) {
-                    pillWindow.webContents.send('transcription-complete', '');
-                }
-            }
-        });
 
         // IPC handler for loading history
         ipcMain.handle('history:load', (event, limit = 50) => {
