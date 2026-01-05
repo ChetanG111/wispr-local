@@ -28,9 +28,9 @@ function createPillWindow() {
     // Window x = center of screen - half of window width
     const centerX = Math.round((screenBounds.width / 2) - (windowWidth / 2));
 
-    // Position window bottom 10px above taskbar
-    // Y = WorkArea Bottom - Window Height - Margin
-    const bottomY = workArea.height - windowHeight - 10;
+    // Position window relative to taskbar
+    // Y = WorkArea Bottom - Window Height + Manual Offset
+    const bottomY = workArea.height - windowHeight + 9;
 
     pillWindow = new BrowserWindow({
         width: windowWidth,
@@ -151,270 +151,246 @@ if (!gotTheLock) {
 
     app.whenReady().then(() => {
         // Initialize modules with production-safe paths
-    const userDataPath = app.getPath('userData');
-    
-    // Initialize logger
-    logger.init();
-    logger.log('App started');
+        const userDataPath = app.getPath('userData');
 
-    // Database: stored in userData/data/app.db
-    db.init(path.join(userDataPath, 'data'));
+        // Initialize logger
+        logger.init();
+        logger.log('App started');
 
-    // Audio Recorder: recordings stored in userData/audio/recordings
-    audioRecorder.init(userDataPath);
+        // Database: stored in userData/data/app.db
+        db.init(path.join(userDataPath, 'data'));
 
-    // Whisper: binary and model paths
-    const whisperBase = app.isPackaged
-        ? path.join(process.resourcesPath, 'whisper')
-        : path.join(__dirname, 'whisper');
+        // Audio Recorder: recordings stored in userData/audio/recordings
+        audioRecorder.init(userDataPath);
 
-    const whisperCli = path.join(whisperBase, 'bin', 'whisper-cli.exe');
-    const whisperModel = path.join(whisperBase, 'models', 'ggml-base.en.bin');
+        // Whisper: binary and model paths
+        const whisperBase = app.isPackaged
+            ? path.join(process.resourcesPath, 'whisper')
+            : path.join(__dirname, 'whisper');
 
-    whisperRunner.init(whisperCli, whisperModel);
+        const whisperCli = path.join(whisperBase, 'bin', 'whisper-cli.exe');
+        const whisperModel = path.join(whisperBase, 'models', 'ggml-base.en.bin');
 
-    createPillWindow();
-    createTranscriptWindow();
-    createTray();
+        whisperRunner.init(whisperCli, whisperModel);
 
-    // Enable auto-launch on startup (only in production)
-    if (app.isPackaged) {
-        app.setLoginItemSettings({
-            openAtLogin: true,
-            openAsHidden: true,
-            path: app.getPath('exe')
+        createPillWindow();
+        createTranscriptWindow();
+        createTray();
+
+        // Enable auto-launch on startup (only in production)
+        if (app.isPackaged) {
+            app.setLoginItemSettings({
+                openAtLogin: true,
+                openAsHidden: true,
+                path: app.getPath('exe')
+            });
+        }
+
+        /* 
+           Using uiohook-napi for global key release detection (Hold-to-Talk).
+           This allows us to detect when the user *releases* keys.
+        */
+        const { uIOhook, UiohookKey } = require('uiohook-napi');
+
+        let isCtrlPressed = false;
+        let isSpacePressed = false;
+        let isRecording = false;
+
+        uIOhook.on('keydown', (e) => {
+            if (e.keycode === UiohookKey.Ctrl) isCtrlPressed = true;
+            if (e.keycode === UiohookKey.Space) isSpacePressed = true;
+
+            if (isCtrlPressed && isSpacePressed && !isRecording) {
+                isRecording = true;
+                if (pillWindow) pillWindow.webContents.send('start-recording');
+            }
         });
-    }
 
-    /* 
-       Using uiohook-napi for global key release detection (Hold-to-Talk).
-       This allows us to detect when the user *releases* keys.
-    */
-    const { uIOhook, UiohookKey } = require('uiohook-napi');
+        uIOhook.on('keyup', (e) => {
+            if (e.keycode === UiohookKey.Ctrl) isCtrlPressed = false;
+            if (e.keycode === UiohookKey.Space) isSpacePressed = false;
 
-    let isCtrlPressed = false;
-    let isSpacePressed = false;
-    let isRecording = false;
+            // If either key is released, stop recording
+            if ((!isCtrlPressed || !isSpacePressed) && isRecording) {
+                isRecording = false;
+                if (pillWindow) pillWindow.webContents.send('stop-recording');
+            }
+        });
 
-    uIOhook.on('keydown', (e) => {
-        if (e.keycode === UiohookKey.Ctrl) isCtrlPressed = true;
-        if (e.keycode === UiohookKey.Space) isSpacePressed = true;
+        uIOhook.start();
 
-        if (isCtrlPressed && isSpacePressed && !isRecording) {
-            isRecording = true;
-            if (pillWindow) pillWindow.webContents.send('start-recording');
-        }
-    });
+        // IPC handler for close button in transcript window
+        ipcMain.on('hide-transcript-window', () => {
+            if (transcriptWindow) {
+                transcriptWindow.hide();
+            }
+        });
 
-    uIOhook.on('keyup', (e) => {
-        if (e.keycode === UiohookKey.Ctrl) isCtrlPressed = false;
-        if (e.keycode === UiohookKey.Space) isSpacePressed = false;
+        // IPC handlers for audio recording
+        ipcMain.on('audio:start', () => {
+            console.log('[main] Received audio:start');
+            logger.log('[main] Received audio:start');
+            try {
+                audioRecorder.startRecording();
+            } catch (err) {
+                console.error('[main] Failed to start recording:', err.message);
+                logger.error(`[main] Failed to start recording: ${err.message}`);
+                dialog.showErrorBox('Recording Error', `Failed to start recording:\n${err.message}`);
+            }
+        });
 
-        // If either key is released, stop recording
-        if ((!isCtrlPressed || !isSpacePressed) && isRecording) {
-            isRecording = false;
-            if (pillWindow) pillWindow.webContents.send('stop-recording');
-        }
-    });
+        ipcMain.on('audio:stop', async () => {
+            console.log('[main] Received audio:stop');
+            logger.log('[main] Received audio:stop');
+            try {
+                const result = audioRecorder.stopRecording();
+                if (result && result.filePath) {
+                    console.log('[main] Recording saved:', result.filePath);
+                    logger.log(`[main] Recording saved: ${result.filePath}`);
 
-    uIOhook.start();
+                    // Small delay to ensure WAV file is fully written
+                    await new Promise(resolve => setTimeout(resolve, 200));
 
-    // IPC handler for close button in transcript window
-    ipcMain.on('hide-transcript-window', () => {
-        if (transcriptWindow) {
-            transcriptWindow.hide();
-        }
-    });
+                    if (!fs.existsSync(result.filePath)) {
+                        logger.error(`[main] Recording file not found on disk: ${result.filePath}`);
+                        if (pillWindow) pillWindow.webContents.send('transcription-complete', '');
+                        return;
+                    }
 
-    // IPC handlers for audio recording
-    ipcMain.on('audio:start', () => {
-        console.log('[main] Received audio:start');
-        logger.log('[main] Received audio:start');
-        try {
-            audioRecorder.startRecording();
-        } catch (err) {
-            console.error('[main] Failed to start recording:', err.message);
-            logger.error(`[main] Failed to start recording: ${err.message}`);
-            dialog.showErrorBox('Recording Error', `Failed to start recording:\n${err.message}`);
-        }
-    });
-
-    ipcMain.on('audio:stop', async () => {
-        console.log('[main] Received audio:stop');
-        logger.log('[main] Received audio:stop');
-        try {
-            const result = audioRecorder.stopRecording();
-            if (result && result.filePath) {
-                console.log('[main] Recording saved:', result.filePath);
-                logger.log(`[main] Recording saved: ${result.filePath}`);
-
-                // Small delay to ensure WAV file is fully written
-                await new Promise(resolve => setTimeout(resolve, 200));
-
-                if (!fs.existsSync(result.filePath)) {
-                    logger.error(`[main] Recording file not found on disk: ${result.filePath}`);
-                    if (pillWindow) pillWindow.webContents.send('transcription-complete', '');
-                    return;
-                }
-
-                // Run Whisper transcription
-                console.log('[main] Starting Whisper transcription...');
-                logger.log('[main] Starting Whisper transcription...');
-                try {
-                    const text = await whisperRunner.transcribe(result.filePath);
-                    console.log('[main] Transcription result:', text);
-                    logger.log(`[main] Transcription result length: ${text.length}`);
-
-                    // Apply formatting
-                    const formattedText = format(text);
-                    console.log('[main] Formatted text:', formattedText);
-                    logger.log('[main] Text formatted');
-
-                    // Save to database
-                    db.insertTranscript({
-                        created_at: new Date().toISOString(),
-                        audio_path: result.filePath,
-                        raw_text: text,
-                        final_text: formattedText,
-                        duration_ms: null,
-                        model: 'whisper.cpp base',
-                        status: 'ok'
-                    });
-
-                    // Auto-paste text
+                    // Run Whisper transcription
+                    console.log('[main] Starting Whisper transcription...');
+                    logger.log('[main] Starting Whisper transcription...');
                     try {
-                        const previousText = clipboard.readText();
-                        // Small delay to ensure clipboard is ready
-                        await new Promise(resolve => setTimeout(resolve, 50));
-                        clipboard.writeText(formattedText);
-                        logger.log('[main] Clipboard updated with new text');
+                        const text = await whisperRunner.transcribe(result.filePath);
+                        console.log('[main] Transcription result:', text);
+                        logger.log(`[main] Transcription result length: ${text.length}`);
 
-                        // Execute VBScript to simulate Ctrl+V
-                        // Using VBScript because it's built-in and reliable on Windows without native node modules
-                        const vbsPath = app.isPackaged 
-                            ? path.join(process.resourcesPath, 'paste.vbs') 
-                            : path.join(__dirname, 'paste.vbs');
-                        
-                        logger.log(`[main] Executing paste script: ${vbsPath}`);
-                        execFile('wscript', [vbsPath], (error) => {
-                            if (error) {
-                                console.error('[main] Paste failed:', error.message);
-                                logger.error(`[main] Paste script failed: ${error.message}`);
-                            } else {
-                                logger.log('[main] Paste script executed successfully');
-                            }
-                            // Restore clipboard after a delay to ensure paste has occurred
-                            // Increased delay to 300ms to be safe
-                            setTimeout(() => {
-                                if (previousText) {
-                                    clipboard.writeText(previousText);
-                                } else {
-                                    clipboard.clear();
-                                }
-                                logger.log('[main] Clipboard restored');
-                            }, 300);
+                        // Apply formatting
+                        const formattedText = format(text);
+                        console.log('[main] Formatted text:', formattedText);
+                        logger.log('[main] Text formatted');
+
+                        // Save to database
+                        db.insertTranscript({
+                            created_at: new Date().toISOString(),
+                            audio_path: result.filePath,
+                            raw_text: text,
+                            final_text: formattedText,
+                            duration_ms: null,
+                            model: 'whisper.cpp base',
+                            status: 'ok'
                         });
-                    } catch (pasteErr) {
-                        console.error('[main] Auto-paste logic error:', pasteErr.message);
-                        logger.error(`[main] Auto-paste logic error: ${pasteErr.message}`);
+
+                        // Auto-paste text
+                        try {
+                            const previousText = clipboard.readText();
+                            // Small delay to ensure clipboard is ready
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                            clipboard.writeText(formattedText);
+                            logger.log('[main] Clipboard updated with new text');
+
+                            // Execute VBScript to simulate Ctrl+V
+                            // Using VBScript because it's built-in and reliable on Windows without native node modules
+                            const vbsPath = app.isPackaged
+                                ? path.join(process.resourcesPath, 'paste.vbs')
+                                : path.join(__dirname, 'paste.vbs');
+
+                            logger.log(`[main] Executing paste script: ${vbsPath}`);
+                            execFile('wscript', [vbsPath], (error) => {
+                                if (error) {
+                                    console.error('[main] Paste failed:', error.message);
+                                    logger.error(`[main] Paste script failed: ${error.message}`);
+                                } else {
+                                    logger.log('[main] Paste script executed successfully');
+                                }
+                                // Restore clipboard after a delay to ensure paste has occurred
+                                // Increased delay to 300ms to be safe
+                                setTimeout(() => {
+                                    if (previousText) {
+                                        clipboard.writeText(previousText);
+                                    } else {
+                                        clipboard.clear();
+                                    }
+                                    logger.log('[main] Clipboard restored');
+                                }, 300);
+                            });
+                        } catch (pasteErr) {
+                            console.error('[main] Auto-paste logic error:', pasteErr.message);
+                            logger.error(`[main] Auto-paste logic error: ${pasteErr.message}`);
+                        }
+
+                        // Send transcription to renderer (Pill)
+                        if (pillWindow) {
+                            pillWindow.webContents.send('transcription-complete', formattedText);
+                        }
+
+                        // Refresh transcript window (History) if it exists
+                        if (transcriptWindow) {
+                            // Send event to reload history
+                            transcriptWindow.webContents.send('refresh-history');
+                        }
+                    } catch (transcribeErr) {
+                        console.error('[main] Transcription failed:', transcribeErr.message);
+                        logger.error(`[main] Transcription failed: ${transcribeErr.message}`);
+
+                        // Save error to database (keep WAV for debugging)
+                        db.insertTranscript({
+                            created_at: new Date().toISOString(),
+                            audio_path: result.filePath,
+                            raw_text: '',
+                            final_text: '',
+                            duration_ms: null,
+                            model: 'whisper.cpp base',
+                            status: 'error'
+                        });
+
+                        // Still notify renderer so it can reset state
+                        if (pillWindow) {
+                            pillWindow.webContents.send('transcription-complete', '');
+                        }
                     }
-
-                    // Send transcription to renderer (Pill)
-                    if (pillWindow) {
-                        pillWindow.webContents.send('transcription-complete', formattedText);
-                    }
-
-                    // Refresh transcript window (History) if it exists
-                    if (transcriptWindow) {
-                         // Send event to reload history
-                         transcriptWindow.webContents.send('refresh-history');
-                    }
-                } catch (transcribeErr) {
-                    console.error('[main] Transcription failed:', transcribeErr.message);
-                    logger.error(`[main] Transcription failed: ${transcribeErr.message}`);
-
-                    // Save error to database (keep WAV for debugging)
-                    db.insertTranscript({
-                        created_at: new Date().toISOString(),
-                        audio_path: result.filePath,
-                        raw_text: '',
-                        final_text: '',
-                        duration_ms: null,
-                        model: 'whisper.cpp base',
-                        status: 'error'
-                    });
-
-                    // Still notify renderer so it can reset state
+                } else {
+                    // No file saved, send empty result
+                    console.log('[main] No recording file saved');
+                    logger.log('[main] No recording file saved from audioRecorder');
                     if (pillWindow) {
                         pillWindow.webContents.send('transcription-complete', '');
                     }
                 }
-            } else {
-                // No file saved, send empty result
-                console.log('[main] No recording file saved');
-                logger.log('[main] No recording file saved from audioRecorder');
+            } catch (err) {
+                console.error('[main] Failed to stop recording:', err.message);
+                logger.error(`[main] Failed to stop recording handler: ${err.message}`);
+                // Notify renderer on error
                 if (pillWindow) {
                     pillWindow.webContents.send('transcription-complete', '');
                 }
             }
-        } catch (err) {
-            console.error('[main] Failed to stop recording:', err.message);
-            logger.error(`[main] Failed to stop recording handler: ${err.message}`);
-            // Notify renderer on error
-            if (pillWindow) {
-                pillWindow.webContents.send('transcription-complete', '');
+        });
+
+        // IPC handler for loading history
+        ipcMain.handle('history:load', (event, limit = 50) => {
+            console.log('[main] Loading history, limit:', limit);
+            return db.getHistory(limit);
+        });
+
+        // IPC handler for deleting a transcript
+        ipcMain.handle('history:delete', (event, id) => {
+            console.log('[main] Deleting transcript id:', id);
+            const audioPath = db.deleteTranscript(id);
+
+            // Delete the audio file from disk
+            if (audioPath && fs.existsSync(audioPath)) {
+                try {
+                    fs.unlinkSync(audioPath);
+                    console.log('[main] Deleted audio file:', audioPath);
+                } catch (err) {
+                    console.error('[main] Failed to delete audio file:', err.message);
+                }
             }
-        }
+
+            return { success: true };
+        });
     });
-
-    // IPC handler for loading history
-    ipcMain.handle('history:load', (event, limit = 50) => {
-        console.log('[main] Loading history, limit:', limit);
-        return db.getHistory(limit);
-    });
-
-    // IPC handler for deleting a transcript
-    ipcMain.handle('history:delete', (event, id) => {
-        console.log('[main] Deleting transcript id:', id);
-        const audioPath = db.deleteTranscript(id);
-
-        // Delete the audio file from disk
-        if (audioPath && fs.existsSync(audioPath)) {
-            try {
-                fs.unlinkSync(audioPath);
-                console.log('[main] Deleted audio file:', audioPath);
-            } catch (err) {
-                console.error('[main] Failed to delete audio file:', err.message);
-            }
-        }
-
-        return { success: true };
-    });
-
-    // IPC handler for re-running formatting on a transcript
-    ipcMain.handle('transcript:rerun', (event, id) => {
-        console.log('[main] Rerunning formatting for id:', id);
-        const transcript = db.getTranscriptById(id);
-
-        if (!transcript) {
-            throw new Error(`Transcript id=${id} not found`);
-        }
-
-        // Apply formatting rules to raw_text
-        const formattedText = format(transcript.raw_text);
-
-        // Update final_text in database
-        db.updateFinalText(id, formattedText);
-
-        console.log('[main] Rerun complete, updated final_text');
-
-        // Return full updated transcript record
-        return {
-            ...transcript,
-            final_text: formattedText
-        };
-    });
-});
 }
 
 // Clean up hook on quit
