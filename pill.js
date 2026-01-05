@@ -100,8 +100,13 @@ ipcRenderer.on('stop-recording', () => {
 });
 
 // Listen for generic notification requests
-ipcRenderer.on('show-notification', (event, content, duration) => {
-    showInfo(content, duration);
+ipcRenderer.on('show-notification', (event, data) => {
+    // Data can be a string or object { text, duration }
+    if (typeof data === 'string') {
+        showInfo(`<span>${data}</span>`, 4000);
+    } else if (data && data.text) {
+        showInfo(`<span>${data.text}</span>`, data.duration || 4000);
+    }
 });
 
 // Listen for transcription complete (from main process after Whisper finishes)

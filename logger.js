@@ -25,4 +25,8 @@ function error(message) {
     log(`ERROR: ${message}`);
 }
 
-module.exports = { init, log, error };
+function warn(message) {
+    log(`WARN: ${message}`);
+}
+
+module.exports = { init, log, error, warn };

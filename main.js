@@ -7,6 +7,8 @@ const whisperRunner = require('./whisperRunner');
 const db = require('./db');
 const { format } = require('./formatter');
 const logger = require('./logger');
+const llamaServer = require('./llamaServer');
+const structureJudge = require('./structureJudge');
 
 let pillWindow;
 let transcriptWindow;
@@ -173,6 +175,26 @@ if (!gotTheLock) {
 
         whisperRunner.init(whisperCli, whisperModel);
 
+        // Llama Server: binary and model paths
+        const llamaExe = app.isPackaged
+            ? path.join(process.resourcesPath, 'models', 'text-refiner', 'bin', 'llama-server.exe')
+            : path.join(__dirname, 'models', 'text-refiner', 'bin', 'llama-server.exe');
+
+        const llamaModelPath = app.isPackaged
+            ? path.join(process.resourcesPath, 'models', 'text-refiner', 'qwen2.5-1.5b-instruct-q4_k_m.gguf')
+            : path.join(__dirname, 'models', 'text-refiner', 'qwen2.5-1.5b-instruct-q4_k_m.gguf');
+
+        // Start the server (non-blocking)
+        llamaServer.start(llamaExe, llamaModelPath, () => {
+            // Notify Pill Window that backend AI is ready
+            if (pillWindow) {
+                pillWindow.webContents.send('show-notification', {
+                    text: 'Structure Model Ready',
+                    duration: 3000
+                });
+            }
+        });
+
         createPillWindow();
         createTranscriptWindow();
         createTray();
@@ -296,16 +318,38 @@ if (!gotTheLock) {
                         }
 
                         // Apply formatting
-                        const formattedText = format(text);
-                        console.log('[main] Formatted text:', formattedText);
-                        logger.log('[main] Text formatted');
+                        // Apply soft formatting (rules)
+                        const softFormattedText = format(text);
+                        logger.log('[main] Soft formatting applied');
+
+                        // Apply Structure Judge (Llama)
+                        // Pipeline: raw -> soft -> judge -> final
+                        let finalText = softFormattedText;
+                        try {
+                            finalText = await structureJudge.improve(text, softFormattedText);
+                            logger.log('[main] Structure judge complete');
+                        } catch (judgeErr) {
+                            console.error('[main] Judge failed, using soft format:', judgeErr);
+                            logger.error(`[main] Judge failed: ${judgeErr.message}`);
+                            finalText = softFormattedText;
+
+                            // Notify user of fallback
+                            if (pillWindow) {
+                                pillWindow.webContents.send('show-notification', {
+                                    text: 'Structure Check Failed (Fallback Used)',
+                                    duration: 3000
+                                });
+                            }
+                        }
+
+                        console.log('[main] Final text:', finalText);
 
                         // Save to database
                         db.insertTranscript({
                             created_at: new Date().toISOString(),
                             audio_path: result.filePath,
                             raw_text: text,
-                            final_text: formattedText,
+                            final_text: finalText,
                             duration_ms: null,
                             model: 'whisper.cpp base',
                             status: 'ok'
@@ -316,7 +360,7 @@ if (!gotTheLock) {
                             const previousText = clipboard.readText();
                             // Small delay to ensure clipboard is ready
                             await new Promise(resolve => setTimeout(resolve, 50));
-                            clipboard.writeText(formattedText);
+                            clipboard.writeText(finalText);
                             logger.log('[main] Clipboard updated with new text');
 
                             // Execute VBScript to simulate Ctrl+V
@@ -351,7 +395,7 @@ if (!gotTheLock) {
 
                         // Send transcription to renderer (Pill)
                         if (pillWindow) {
-                            pillWindow.webContents.send('transcription-complete', formattedText);
+                            pillWindow.webContents.send('transcription-complete', finalText);
                         }
 
                         // Refresh transcript window (History) if it exists
@@ -455,5 +499,8 @@ app.on('before-quit', () => {
     uIOhook.stop();
     // Close database connection
     db.close();
+
+    // Kill Llama Server
+    llamaServer.stop();
 });
 
